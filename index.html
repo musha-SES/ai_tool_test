@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Email Generator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>ビジネスメールジェネレーター</h1>
+
+    <div class="form-section">
+        <h2>メール生成</h2>
+        <label for="subject">件名:</label>
+        <input type="text" id="subject" value="会議の議事録送付">
+
+        <label for="to">宛先:</label>
+        <input type="text" id="to" value="〇〇様">
+
+        <label for="purpose">目的:</label>
+        <input type="text" id="purpose" value="会議の議事録を送付する">
+
+        <label for="bodyPoints">本文に盛り込む要点 (カンマ区切り):</label>
+        <input type="text" id="bodyPoints" value="日時、場所、決定事項、次回の課題">
+
+        <label for="tone">トーン:</label>
+        <select id="tone">
+            <option value="丁寧">丁寧</option>
+            <option value="カジュアル">カジュアル</option>
+            <option value="フォーマル">フォーマル</option>
+        </select>
+
+        <label for="manner">マナー:</label>
+        <select id="manner">
+            <option value="通常の">通常の</option>
+            <option value="緊急の">緊急の</option>
+            <option value="お詫びの">お詫びの</option>
+        </select>
+
+        <button id="generateEmail">メール生成</button>
+        <textarea id="emailOutput" rows="10" cols="50" placeholder="生成されたメールがここに表示されます"></textarea>
+    </div>
+
+    <div class="form-section">
+        <h2>テキスト変換</h2>
+        <label for="transformText">変換対象の文章:</label>
+        <textarea id="transformText" rows="5" cols="50" placeholder="ここに文章を入力してください"></textarea>
+
+        <label for="transformType">変換タイプ:</label>
+        <select id="transformType">
+            <option value="summary">要約</option>
+            <option value="bullet_points">箇条書き</option>
+        </select>
+
+        <button id="transformButton">変換</button>
+        <textarea id="transformedOutput" rows="5" cols="50" placeholder="変換されたテキストがここに表示されます"></textarea>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
