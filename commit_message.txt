@@ -1,0 +1,5 @@
+feat: Electronアプリケーションの初期フロントエンドコードと設定を追加
+
+- HTML, CSS, JavaScriptファイルをsrcディレクトリに配置
+- Electronのmain.jsとpackage.jsonを設定
+- node_modulesを.gitignoreに追加

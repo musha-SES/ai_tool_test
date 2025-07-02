@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ビジネスメールジェネレーター</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>ビジネスメールジェネレーター</h1>
+
+        <div class="input-section">
+            <div class="form-group">
+                <label for="mail-subject">件名:</label>
+                <input type="text" id="mail-subject" name="subject">
+            </div>
+            <div class="form-group">
+                <label for="mail-to">宛先:</label>
+                <input type="text" id="mail-to" name="to">
+            </div>
+            <div class="form-group">
+                <label for="mail-purpose">目的:</label>
+                <textarea id="mail-purpose" name="purpose" rows="4"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>本文の要点:</label>
+                <div class="checkbox-group">
+                    <label><input type="checkbox" name="bodyPoints" value="新製品の紹介"> 新製品の紹介</label>
+                    <label><input type="checkbox" name="bodyPoints" value="会議日程の調整依頼"> 会議日程の調整依頼</label>
+                    <label><input type="checkbox" name="bodyPoints" value="資料送付の連絡"> 資料送付の連絡</label>
+                    <label><input type="checkbox" name="bodyPoints" value="お礼の言葉"> お礼の言葉</label>
+                    <label><input type="checkbox" name="bodyPoints" value="進捗報告"> 進捗報告</label>
+                    <label><input type="checkbox" name="bodyPoints" value="その他"> その他</label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="mail-tone">トーン選択:</label>
+                <select id="mail-tone" name="tone">
+                    <option value="丁寧" selected>丁寧</option>
+                    <option value="カジュアル">カジュアル</option>
+                    <option value="緊急">緊急</option>
+                    <option value="説得力がある">説得力がある</option>
+                    <option value="感謝">感謝</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="mail-manner">マナー選択:</label>
+                <select id="mail-manner" name="manner">
+                    <option value="社内向け" selected>社内向け</option>
+                    <option value="顧客向け">顧客向け</option>
+                    <option value="上司向け">上司向け</option>
+                    <option value="部下向け">部下向け</option>
+                </select>
+            </div>
+
+            <button id="generate-button">生成</button>
+        </div>
+
+        <div class="result-section">
+            <h2>生成結果:</h2>
+            <textarea id="result-text" readonly rows="15"></textarea>
+            <button id="copy-button">コピー</button>
+        </div>
+
+        <div class="additional-features">
+            <h2>要約・箇条書き変換</h2>
+            <button id="summarize-button">要約する</button>
+            <button id="bullet-points-button">箇条書きにする</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
