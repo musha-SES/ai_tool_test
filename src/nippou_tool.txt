@@ -1,0 +1,715 @@
+/**
+ * スプレッドシートを開いたときにカスタムメニューを追加する関数。
+ */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('日報AIツール')
+    .addItem('日報質問送信（Chatwork）', 'sendDailyReportQuestions')
+    .addItem('Chatwork日報取得・分析', 'processChatworkReplies')
+    .addSeparator()
+    .addItem('定期実行トリガーを設定', 'createDailyTriggers')
+    .addItem('全てのトリガーを削除', 'deleteTriggers')
+    .addToUi();
+}
+
+// --- トリガー管理機能 ---
+
+/**
+ * スクリプトプロパティから定期実行の時刻を取得する。
+ * @returns {{questionHour: number, questionMinute: number, replyHour: number, replyMinute: number}}
+ */
+function getScheduledTimes() {
+  const properties = PropertiesService.getScriptProperties();
+  const defaults = {
+    questionHour: 9,
+    questionMinute: 0,
+    replyHour: 18,
+    replyMinute: 0
+  };
+
+  const getPropertyAsInt = (key, defaultValue) => {
+    const prop = properties.getProperty(key);
+    const value = parseInt(prop, 10);
+    if (isNaN(value)) {
+      Logger.log(`スクリプトプロパティ「${key}」が未設定または不正です。デフォルト値 (${defaultValue}) を使用します。`);
+      return defaultValue;
+    }
+    return value;
+  };
+
+  const questionHour = getPropertyAsInt('DAILY_QUESTION_TIME_HOUR', defaults.questionHour);
+  const questionMinute = getPropertyAsInt('DAILY_QUESTION_TIME_MINUTE', defaults.questionMinute);
+  const replyHour = getPropertyAsInt('DAILY_REPLY_COLLECT_TIME_HOUR', defaults.replyHour);
+  const replyMinute = getPropertyAsInt('DAILY_REPLY_COLLECT_TIME_MINUTE', defaults.replyMinute);
+
+  return { questionHour, questionMinute, replyHour, replyMinute };
+}
+
+/**
+ * 毎日の定期実行トリガーを作成する。
+ */
+function createDailyTriggers() {
+  // 既存のトリガーを一旦すべて削除
+  deleteTriggers();
+
+  const { questionHour, questionMinute, replyHour, replyMinute } = getScheduledTimes();
+
+  // 質問送信トリガー
+  ScriptApp.newTrigger('sendDailyReportQuestions')
+    .timeBased()
+    .everyDays(1)
+    .atHour(questionHour)
+    .nearMinute(questionMinute) // atMinuteの代わりにnearMinuteで柔軟性を持たせる
+    .create();
+  Logger.log(`日報質問送信トリガーを毎日 ${questionHour}時${questionMinute}分頃に設定しました。`);
+
+  // 返信収集トリガー
+  ScriptApp.newTrigger('processChatworkReplies')
+    .timeBased()
+    .everyDays(1)
+    .atHour(replyHour)
+    .nearMinute(replyMinute)
+    .create();
+  Logger.log(`Chatwork日報取得・分析トリガーを毎日 ${replyHour}時${replyMinute}分頃に設定しました。`);
+
+  // クリーンアップトリガー（毎週月曜日深夜）
+  ScriptApp.newTrigger('cleanUpBotQuestionLog')
+    .timeBased()
+    .everyWeeks(1) // 毎週
+    .onWeekDay(ScriptApp.WeekDay.MONDAY) // 月曜日
+    .atHour(2) // 深夜2時
+    .create();
+  Logger.log(`BOT質問ログクリーンアップトリガーを毎週月曜日深夜2時に設定しました。`);
+
+  SpreadsheetApp.getUi().alert('定期実行トリガーを設定しました。 質問送信: 毎日' + `${questionHour}時${questionMinute}分頃` + ' 返信収集: 毎日' + `${replyHour}時${replyMinute}分頃` + ' ログクリーンアップ: 毎週月曜日深夜');
+}
+
+/**
+ * BOT質問ログシートをクリーンアップする。
+ * - 「返信済み_処理成功」のレコードを削除。
+ * - 古い「未返信」レコード（7日以上前）を削除。
+ * - 古いエラー/フォーマット不正レコード（7日以上前）を削除。
+ */
+function cleanUpBotQuestionLog() {
+  const logSheetName = 'BOT質問ログ';
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(logSheetName);
+  if (!sheet) {
+    Logger.log(`シート「${logSheetName}」が見つかりません。クリーンアップをスキップします。`);
+    return;
+  }
+
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+  if (values.length <= 1) { // ヘッダー行のみの場合
+    Logger.log('BOT質問ログシートにデータがありません。クリーンアップをスキップします。');
+    return;
+  }
+
+  const rowsToDelete = [];
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  for (let i = 1; i < values.length; i++) { // ヘッダー行をスキップ
+    const row = values[i];
+    const status = row[3].toString(); // ステータス列 (D列)
+    const timestamp = new Date(row[2]); // 送信日時列 (C列)
+
+    if (status === '返信済み_処理成功') {
+      rowsToDelete.push(i + 1); // 行番号を記録
+    } else if (status === '未返信' && timestamp < sevenDaysAgo) {
+      rowsToDelete.push(i + 1);
+    } else if ((status === '返信済み_フォーマット不正' || status.startsWith('エラー発生')) && timestamp < sevenDaysAgo) {
+      rowsToDelete.push(i + 1);
+    }
+  }
+
+  // 行番号が大きい方から削除していく（インデックスがずれないようにするため）
+  rowsToDelete.sort((a, b) => b - a);
+  for (const rowIndex of rowsToDelete) {
+    sheet.deleteRow(rowIndex);
+  }
+  Logger.log(`BOT質問ログシートのクリーンアップが完了しました。${rowsToDelete.length}件のレコードを削除しました。`);
+}
+
+/**
+ * このスクリプトで設定されたすべてのトリガーを削除する。
+ */
+function deleteTriggers() {
+  const triggers = ScriptApp.getProjectTriggers();
+  for (const trigger of triggers) {
+    ScriptApp.deleteTrigger(trigger);
+  }
+  Logger.log('すべてのトリガーを削除しました。');
+}
+
+/**
+ * Googleフォームの回答がスプレッドシートに送信されたときにトリガーされる関数。
+ * @param {Object} e イベントオブジェクト。フォームの回答データを含む。
+ */
+function onFormSubmit(e) {
+  const response = e.namedValues;
+  const reportData = {
+    date: response['日付'] ? response['日付'][0] : 'N/A',
+    name: response['氏名'] ? response['氏名'][0] : 'N/A',
+    workContent: response['今日の業務内容'] ? response['今日の業務内容'][0] : 'N/A',
+    mood: response['今日の気分'] ? response['今日の気分'][0] : 'N/A',
+    problems: response['困っていること'] ? response['困っていること'][0] : '特になし'
+  };
+
+  Logger.log('--- Googleフォームから日報データ受信 ---');
+  Logger.log(JSON.stringify(reportData, null, 2));
+  Logger.log('---------------------------------');
+
+  assessAndNotify(reportData);
+}
+
+// --- Chatwork連携機能 ---
+
+/**
+ * Chatwork APIキーをスクリプトプロパティから取得する。
+ * @returns {string} Chatwork APIキー
+ * @throws {Error} APIキーが設定されていない場合
+ */
+function getChatworkApiKey() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('CHATWORK_API_KEY');
+  if (!apiKey) {
+    throw new Error('Chatwork API Key is not set in Script Properties.');
+  }
+  return apiKey;
+}
+
+/**
+ * Chatworkの対象ルームIDをスクリプトプロパティから取得する。
+ * @returns {Object} 氏名をキー、ルームIDを値とするオブジェクト
+ * @throws {Error} ルームIDが設定されていない場合
+ */
+function getChatworkTargetRoomIds() {
+  const roomIdsStr = PropertiesService.getScriptProperties().getProperty('CHATWORK_ROOM_IDS');
+  if (!roomIdsStr) {
+    throw new Error('Chatwork Room IDs are not set in Script Properties.');
+  }
+  try {
+    return JSON.parse(roomIdsStr);
+  } catch (e) {
+    throw new Error('Failed to parse Chatwork Room IDs. Please ensure it is a valid JSON string like: {"manager": "12345", "user1": "67890"}');
+  }
+}
+
+/**
+ * 全ての部下に日報提出を促す質問をChatworkで送信する。
+ */
+function sendDailyReportQuestions() {
+  const roomIds = getChatworkTargetRoomIds();
+  const managerName = "manager"; // マネージャーのキー名は固定
+  const pendingQuestions = getPendingQuestionMessages(); // 未処理の質問メッセージIDを取得
+
+  for (const name in roomIds) {
+    if (name !== managerName) {
+      const roomId = roomIds[name];
+
+      // 未処理またはロック状態の日報が存在するかチェック
+      const existingPending = pendingQuestions.find(q => 
+        q.roomId === roomId && 
+        (q.status === '未返信' || q.status === '返信済み_フォーマット不正' || q.status.startsWith('エラー発生'))
+      );
+
+      if (existingPending) {
+        Logger.log(`${name}さん（ルームID: ${roomId}）には未処理またはロック状態の日報が存在するため、質問送信をスキップしました。ステータス: ${existingPending.status}`);
+        continue; // 次のルームへ
+      }
+
+      const message = `[To:${roomId}] ${name}さん
+おはようございます！
+本日の日報を以下のフォーマットでご返信ください。
+
+#日報
+業務内容：
+気分：(良い/普通/悪い)
+困っていること：`;
+      try {
+        const response = sendChatworkNotification(roomId, message);
+        const messageId = response.message_id.toString();
+        logQuestionMessageId(roomId, messageId, new Date(), '未返信'); // 初期ステータスを「未返信」で記録
+        Logger.log(`${name}さん (Room ID: ${roomId}) への質問送信に成功しました。メッセージID: ${messageId}`);
+      } catch (e) {
+        Logger.log(`${name}さん (Room ID: ${roomId}) への質問送信に失敗しました: ${e.message}`);
+      }
+    }
+  }
+}
+
+/**
+ * Chatworkの返信を収集し、日報として解析・評価する。
+ */
+function processChatworkReplies() {
+  const roomIds = getChatworkTargetRoomIds();
+  const managerName = "manager";
+  const botAccountId = getBotChatworkAccountId(); // BOT自身のアカウントIDを取得
+  const pendingQuestions = getPendingQuestionMessages(); // 未処理の質問メッセージIDを取得
+
+  for (const name in roomIds) {
+    if (name !== managerName) {
+      const roomId = roomIds[name];
+      
+      // このルームIDに対する未処理（未返信、エラー、フォーマット不正）の質問メッセージIDをフィルタリング
+      const questionsForThisRoom = pendingQuestions.filter(q => 
+        q.roomId === roomId && 
+        q.status !== '返信済み_処理成功'
+      );
+
+      if (questionsForThisRoom.length === 0) {
+        Logger.log(`${name}さん (Room ID: ${roomId}) に対する未処理の質問メッセージが見つかりませんでした。`);
+        continue; // 次のルームへ
+      }
+
+      // ロック状態の質問をスキップ
+      const lockedQuestion = questionsForThisRoom.find(q => 
+        q.status === '返信済み_フォーマット不正' || 
+        q.status.startsWith('エラー発生')
+      );
+      if (lockedQuestion) {
+        Logger.log(`${name}さん (Room ID: ${roomId}) の日報はロックステータス（${lockedQuestion.status}）のためスキップしました。`);
+        continue; // 次のルームへ
+      }
+
+      try {
+        const messages = getChatworkMessages(roomId, 50); // 直近50件のメッセージを取得（返信を探すため多めに）
+
+        let processedThisRoom = false;
+        for (let i = messages.length - 1; i >= 0; i--) { // 最新のメッセージから遡る
+          const msg = messages[i];
+
+          // BOT自身が送信したメッセージはスキップ
+          if (msg.account_id && msg.account_id.toString() === botAccountId) {
+            continue;
+          }
+
+          // 引用形式の返信メッセージかチェック
+          const replyMatch = msg.body.match(/\[rp aid=(\d+) to=(\d+)-(\d+)\]/);
+          if (replyMatch) {
+            const repliedToMessageId = replyMatch[3]; // 返信元のメッセージID
+
+            // この返信が、BOTが送信した質問メッセージへの返信かチェック
+            const matchedQuestion = questionsForThisRoom.find(q => q.messageId === repliedToMessageId);
+
+            if (matchedQuestion) {
+              // 日報フォーマットのチェック
+              if (msg.body.includes('#日報') && msg.body.includes('業務内容：') && msg.body.includes('気分：') && msg.body.includes('困っていること：')) {
+                const reportData = parseReportFromMessage(name, msg.body);
+                Logger.log(`--- Chatworkから日報データ抽出 (${name}) ---`);
+                Logger.log(JSON.stringify(reportData, null, 2));
+                Logger.log('------------------------------------');
+
+                const validationResult = validateDailyReport(reportData);
+                if (validationResult.isValid) {
+                  try {
+                    assessAndNotify(reportData);
+                    updateQuestionStatus(roomId, matchedQuestion.messageId, '返信済み_処理成功'); // 処理成功
+                  } catch (e) {
+                    Logger.log(`日報処理中にエラーが発生しました: ${e.message}`);
+                    updateQuestionStatus(roomId, matchedQuestion.messageId, 'エラー発生_その他', e.message); // その他エラー
+                  }
+                } else {
+                  Logger.log(`${name}さんの日報はフォーマット不正/不完全なためスキップしました。詳細: ${validationResult.message}`);
+                  updateQuestionStatus(roomId, matchedQuestion.messageId, '返信済み_フォーマット不正', validationResult.message); // フォーマット不正
+                }
+              } else {
+                Logger.log(`${name}さんのメッセージ (ID: ${msg.message_id}) は質問への返信ですが、日報フォーマットではありませんでした。スキップします。`);
+                // 日報フォーマットではないが、質問への返信なので、ステータスは更新しない（再提出を促すため）
+              }
+              processedThisRoom = true; // 質問への返信が見つかったので、このルームの処理は完了
+              break; // このルームのメッセージループを抜ける
+            }
+          }
+        }
+        if (!processedThisRoom) {
+          Logger.log(`${name}さん (Room ID: ${roomId}) の日報返信が見つかりませんでした、または未処理の質問メッセージへの有効な返信ではありませんでした。`);
+        }
+      } catch (e) {
+        Logger.log(`${name}さん (Room ID: ${roomId}) のメッセージ処理中にエラーが発生しました: ${e.message}`);
+        // ルーム全体のメッセージ取得エラーなど、特定の質問に紐づかないエラー
+        // この場合、どの質問メッセージIDに紐づけるか判断できないため、ログのみ
+      }
+    }
+  }
+}
+
+/**
+ * Chatwork APIを呼び出してメッセージを取得する。
+ * @param {string} roomId ルームID
+ * @param {number} count 取得するメッセージ数
+ * @returns {Array} メッセージオブジェクトの配列
+ */
+function getChatworkMessages(roomId, count) {
+  const apiKey = getChatworkApiKey();
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages?force=1`;
+  
+  const options = {
+    method: 'get',
+    headers: { 'X-ChatWorkToken': apiKey },
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const responseCode = response.getResponseCode();
+  const responseText = response.getContentText();
+
+  if (responseCode === 200) {
+    return JSON.parse(responseText).slice(-count); // 最新のメッセージを返す
+  } else {
+    throw new Error(`Chatwork APIからのメッセージ取得に失敗しました。Status: ${responseCode}, Response: ${responseText}`);
+  }
+}
+
+/**
+ * メッセージの中から最新の日報返信を探す。
+ * @param {Array} messages メッセージオブジェクトの配列
+ * @returns {Object|null} 日報返信メッセージオブジェクト or null
+ */
+function findLatestDailyReportReply(messages) {
+    // 簡易的にキーワードを含む最新のメッセージを返信とみなす
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i].body;
+        if (msg.includes('#日報') && msg.includes('業務内容：') && msg.includes('気分：') && msg.includes('困っていること：')) {
+            return messages[i];
+        }
+    }
+    return null;
+}
+
+/**
+ * Chatworkメッセージから日報データを抽出する。
+ * @param {string} name 氏名
+ * @param {string} messageBody メッセージ本文
+ * @returns {Object} 日報データオブジェクト
+ */
+function parseReportFromMessage(name, messageBody) {
+  const workContentMatch = messageBody.match(/業務内容：([\s\S]*?)(?=気分：)/);
+  const moodMatch = messageBody.match(/気分：([\s\S]*?)(?=困っていること：)/);
+  const problemsMatch = messageBody.match(/困っていること：([\s\S]*)/);
+
+  return {
+    date: new Date().toLocaleString('ja-JP'),
+    name: name,
+    workContent: workContentMatch ? workContentMatch[1].trim() : 'N/A',
+    mood: moodMatch ? moodMatch[1].trim() : 'N/A',
+    problems: problemsMatch ? problemsMatch[1].trim() : '特になし'
+  };
+}
+
+/**
+ * 日報データのバリデーションを行う。
+ * @param {Object} reportData 日報データオブジェクト
+ * @returns {{isValid: boolean, message: string}} バリデーション結果とメッセージ
+ */
+function validateDailyReport(reportData) {
+  const moods = ['良い', '普通', '悪い'];
+
+  if (!reportData.name || reportData.name.trim() === 'N/A') {
+    return { isValid: false, message: '氏名が空です。' };
+  }
+  if (!reportData.workContent || reportData.workContent.trim() === 'N/A' || reportData.workContent.trim() === '') {
+    return { isValid: false, message: '業務内容が空です。' };
+  }
+  if (!reportData.mood || reportData.mood.trim() === 'N/A' || !moods.includes(reportData.mood.trim())) {
+    return { isValid: false, message: `気分に不正な値が入力されています。（${reportData.mood}）` };
+  }
+  // problemsは任意項目なのでバリデーションしない
+
+  return { isValid: true, message: '' };
+}
+
+
+// --- Gemini API & 通知機能 ---
+
+/**
+ * 日報データを評価し、必要に応じて通知する。
+ * @param {Object} reportData 日報データ
+ */
+function assessAndNotify(reportData) {
+  const geminiPrompt = `以下の日報の内容を分析し、提出者の現在の心理状態や業務の調子について、5段階（非常に良い、良い、普通、少し悪い、危険）で評価してください。\n**特に「今日の気分」が悪い場合や、「困っていること」にネガティブな兆候が見られる場合は「危険」と判断し、その理由も簡潔に述べてください。**\n氏名は匿名化し、「提出者」として言及してください。\n\n業務内容：${reportData.workContent}\n気分：${reportData.mood}\n困っていること：${reportData.problems}
+
+結果はJSON形式で返してください。例: { "status": "危険", "reason": "具体例：今日の気分が悪いと申告しており、困っている内容にXXとあるため。" }`;
+
+  let geminiStatus = '不明';
+  let geminiReason = 'Gemini APIからの応答がありませんでした。';
+
+  try {
+    const geminiResponse = callGeminiApi(geminiPrompt);
+    let rawGeminiText = geminiResponse.candidates[0].content.parts[0].text;
+    
+    const jsonMatch = rawGeminiText.match(/\{([\s\S]*?)\}/);
+    
+    if (jsonMatch && jsonMatch[0]) {
+      const jsonString = jsonMatch[0];
+      const parsedResponse = JSON.parse(jsonString);
+      geminiStatus = parsedResponse.status;
+      geminiReason = parsedResponse.reason;
+    } else {
+      throw new Error('Gemini API response did not contain a valid JSON object.');
+    }
+
+    Logger.log(`Gemini AIによる評価: 状態 - ${geminiStatus}, 理由 - ${geminiReason}`);
+
+  } catch (error) {
+    Logger.log('Gemini API呼び出しまたは応答解析に失敗しました: ' + error.message);
+  }
+
+  if (geminiStatus === '危険' || geminiStatus === '少し悪い') {
+    const roomIds = getChatworkTargetRoomIds();
+    const managerRoomId = roomIds.manager;
+
+    if (!managerRoomId) {
+        Logger.log("マネージャーのChatworkルームIDが設定されていません。通知をスキップします。");
+        return;
+    }
+
+    const subject = `【注意】日報から社員の調子に懸念 - ${reportData.name}`;
+    const body = `[info]
+` +
+                 `[title]${subject}[/title]
+` +
+                 `提出者：${reportData.name}
+` +
+                 `日付：${reportData.date}
+` +
+                 `Gemini AIによる評価：${geminiStatus}
+` +
+                 `理由：${geminiReason}
+` +
+                 `[hr]
+` +
+                 `▼ 日報抜粋
+` +
+                 `今日の気分：${reportData.mood}
+` +
+                 `困っていること：${reportData.problems}
+` +
+                 `[hr]
+` +
+                 `詳細については、スプレッドシートをご確認ください。
+` +
+                 `[/info]`;
+    try {
+      sendChatworkNotification(managerRoomId, body);
+      Logger.log('Chatworkへの注意通知が正常に送信されました。');
+    } catch (e) {
+      Logger.log('Chatworkへの注意通知の送信に失敗しました: ' + e.message);
+    }
+  } else {
+    Logger.log(`社員の調子は「${geminiStatus}」と判断されました。Chatwork通知は行いません。`);
+  }
+
+  // スプレッドシートへのログ記録
+  try {
+    logReportToSheet(reportData, geminiStatus, geminiReason);
+  } catch (e) {
+    Logger.log('スプレッドシートへの日報ログ記録に失敗しました: ' + e.message);
+  }
+}
+
+/**
+ * 日報データをスプレッドシートに記録する。
+ * @param {Object} reportData 日報データ
+ * @param {string} status AIによる評価状態
+ * @param {string} reason AIによる評価理由
+ */
+function logReportToSheet(reportData, status, reason) {
+  const logSheetName = '日報ログ';
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(logSheetName);
+  if (!sheet) {
+    throw new Error(`シート「${logSheetName}」が見つかりません。`);
+  }
+
+  const logData = [
+    new Date(), // タイムスタンプ
+    reportData.name,
+    reportData.date,
+    reportData.workContent,
+    reportData.mood,
+    reportData.problems,
+    status,
+    reason
+  ];
+
+  sheet.appendRow(logData);
+  Logger.log(`日報データを「${logSheetName}」シートに記録しました。`);
+}
+
+/**
+ * Chatworkにメッセージを送信する汎用関数。
+ * @param {string} roomId 送信先のルームID
+ * @param {string} message 送信するメッセージ本文
+ * @returns {Object} Chatwork APIからのレスポンスオブジェクト
+ */
+function sendChatworkNotification(roomId, message) {
+  const apiKey = getChatworkApiKey();
+  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
+
+  const payload = {
+    body: message,
+    self_unread: 1 // 自分にも未読にする
+  };
+
+  const options = {
+    method: 'post',
+    headers: { 'X-ChatWorkToken': apiKey },
+    contentType: 'application/x-www-form-urlencoded',
+    payload: Object.keys(payload).map(key => `${key}=${encodeURIComponent(payload[key])}`).join('&'),
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const responseCode = response.getResponseCode();
+  const responseText = response.getContentText();
+
+  if (responseCode !== 200) {
+    throw new Error(`Chatwork APIへのメッセージ送信に失敗しました。Status: ${responseCode}, Response: ${responseText}`);
+  }
+  return JSON.parse(responseText); // レスポンス全体を返す
+}
+
+/**
+ * BOT自身（APIトークン所有者）のChatworkアカウントIDを取得する。
+ * @returns {string} BOTのChatworkアカウントID
+ */
+function getBotChatworkAccountId() {
+  const apiKey = getChatworkApiKey();
+  const url = 'https://api.chatwork.com/v2/me';
+  const options = {
+    method: 'get',
+    headers: { 'X-ChatWorkToken': apiKey },
+    muteHttpExceptions: true
+  };
+  const response = UrlFetchApp.fetch(url, options);
+  const responseCode = response.getResponseCode();
+  if (responseCode !== 200) {
+    throw new Error(`Chatwork API (me) からアカウントIDの取得に失敗しました。Status: ${responseCode}, Response: ${response.getContentText()}`);
+  }
+  const me = JSON.parse(response.getContentText());
+  return me.account_id.toString();
+}
+
+/**
+ * 送信した質問メッセージのIDをBOT質問ログシートに記録する。
+ * @param {string} roomId 質問を送信したルームID
+ * @param {string} messageId 送信された質問メッセージのID
+ * @param {Date} timestamp 送信日時
+ * @param {string} status 初期ステータス
+ */
+function logQuestionMessageId(roomId, messageId, timestamp, status) {
+  const logSheetName = 'BOT質問ログ';
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(logSheetName);
+  if (!sheet) {
+    throw new Error(`シート「${logSheetName}」が見つかりません。`);
+  }
+  sheet.appendRow([roomId, messageId, timestamp, status, '']);
+  Logger.log(`質問メッセージID ${messageId} をルーム ${roomId} に記録しました。ステータス: ${status}`);
+}
+
+/**
+ * BOT質問ログシートから未処理の質問メッセージIDを読み込む。
+ * @returns {Array<Object>} 未処理の質問メッセージオブジェクトの配列
+ */
+function getPendingQuestionMessages() {
+  const logSheetName = 'BOT質問ログ';
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(logSheetName);
+  if (!sheet) {
+    Logger.log(`シート「${logSheetName}」が見つかりません。未処理の質問メッセージはありません。`);
+    return [];
+  }
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+  if (values.length <= 1) { // ヘッダー行のみの場合
+    return [];
+  }
+  const pendingQuestions = [];
+  for (let i = 1; i < values.length; i++) {
+    pendingQuestions.push({
+      rowIndex: i + 1, // スプレッドシートの行番号
+      roomId: values[i][0].toString(),
+      messageId: values[i][1].toString(),
+      timestamp: new Date(values[i][2]),
+      status: values[i][3].toString(),
+      errorDetail: values[i][4] ? values[i][4].toString() : ''
+    });
+  }
+  return pendingQuestions;
+}
+
+/**
+ * BOT質問ログシートの質問メッセージのステータスを更新する。
+ * @param {string} roomId 対象のルームID
+ * @param {string} messageId 対象のメッセージID
+ * @param {string} newStatus 更新後のステータス
+ * @param {string} [errorDetail=''] エラー詳細（エラー発生時のみ）
+ */
+function updateQuestionStatus(roomId, messageId, newStatus, errorDetail = '') {
+  const logSheetName = 'BOT質問ログ';
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(logSheetName);
+  if (!sheet) {
+    Logger.log(`シート「${logSheetName}」が見つかりません。ステータス更新はできませんでした。`);
+    return;
+  }
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+  for (let i = 1; i < values.length; i++) { // ヘッダー行をスキップ
+    if (values[i][0].toString() === roomId && values[i][1].toString() === messageId) {
+      sheet.getRange(i + 1, 4).setValue(newStatus); // ステータス列 (D列)
+      sheet.getRange(i + 1, 5).setValue(errorDetail); // エラー詳細列 (E列)
+      Logger.log(`質問メッセージID ${messageId} のステータスを ${newStatus} に更新しました。`);
+      return;
+    }
+  }
+  Logger.log(`質問メッセージID ${messageId} をルーム ${roomId} から見つけられませんでした。ステータス更新失敗。`);
+}
+
+
+/**
+ * Gemini APIキーをスクリプトプロパティから取得する。
+ * @returns {string} Gemini APIキー
+ */
+function getGeminiApiKey() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) {
+    throw new Error('Gemini API Key is not set in Script Properties.');
+  }
+  return apiKey;
+}
+
+/**
+ * Gemini APIを呼び出し、応答をJSON形式で返す。
+ * @param {string} prompt Geminiに送信するプロンプト
+ * @returns {Object} Geminiからの生のJSON応答オブジェクト
+ */
+function callGeminiApi(prompt) {
+  const apiKey = getGeminiApiKey();
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+  const requestBody = {
+    contents: [{ parts: [{ text: prompt }] }]
+  };
+
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(requestBody),
+    muteHttpExceptions: true,
+  };
+
+  Logger.log('Gemini APIに送信するプロンプト: ' + prompt);
+
+  const response = UrlFetchApp.fetch(apiUrl, options);
+  const responseCode = response.getResponseCode();
+  const responseText = response.getContentText();
+
+  if (responseCode === 200) {
+    try {
+      return JSON.parse(responseText);
+    } catch (e) {
+      throw new Error('Gemini API returned invalid JSON: ' + responseText);
+    }
+  } else {
+    throw new Error(`Gemini API呼び出しが失敗しました。HTTPステータスコード: ${responseCode}, 応答: ${responseText}`);
+  }
+}
