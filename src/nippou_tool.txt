@@ -9,6 +9,8 @@ function onOpen() {
     .addSeparator()
     .addItem('定期実行トリガーを設定', 'createDailyTriggers')
     .addItem('全てのトリガーを削除', 'deleteTriggers')
+    .addSeparator()
+    .addItem('自己評価シート分析', 'processSelfEvaluationSheets')
     .addToUi();
 }
 
@@ -722,6 +724,141 @@ function callGeminiApi(prompt) {
   } catch (e) {
     // ここでのエラーはassessAndNotifyでキャッチされ、マネージャーに通知される
     throw e; // 再スローしてassessAndNotifyで処理させる
+  }
+}
+
+// --- 自己評価シート分析機能 ---
+
+/**
+ * 自己評価シート（CSVファイル）が格納されているGoogleドライブのフォルダIDをスクリプトプロパティから取得する。
+ * @returns {string} GoogleドライブのフォルダID
+ * @throws {Error} フォルダIDが設定されていない場合
+ */
+function getSelfEvaluationFolderId() {
+  const folderId = PropertiesService.getScriptProperties().getProperty('SELF_EVALUATION_FOLDER_ID');
+  if (!folderId) {
+    throw new Error('SELF_EVALUATION_FOLDER_ID is not set in Script Properties.');
+  }
+  return folderId;
+}
+
+/**
+ * 自己評価シートの氏名列のヘッダー名をスクリプトプロパティから取得する。
+ * @returns {string} 氏名列のヘッダー名
+ */
+function getSelfEvaluationNameColumnHeader() {
+  const header = PropertiesService.getScriptProperties().getProperty('SELF_EVALUATION_NAME_COLUMN_HEADER');
+  return header || '氏名'; // デフォルトは「氏名」
+}
+
+/**
+ * CSVデータをパースして2次元配列として返す。
+ * @param {string} csvText CSVファイルのテキスト内容
+ * @returns {string[][]} パースされたCSVデータ
+ */
+function parseCsvData(csvText) {
+  const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
+  return lines.map(line => {
+    // カンマ区切りで、ダブルクォートで囲まれた部分はカンマを含めて1つの要素とする
+    const regex = /(?:"([^"]*(?:""[^"]*)*)"|([^,]*))(?:,|$)/g;
+    let match;
+    const row = [];
+    while ((match = regex.exec(line)) !== null) {
+      // ダブルクォートで囲まれていれば、ダブルクォートを外し、エスケープされたダブルクォートを解除
+      const value = match[1] !== undefined ? match[1].replace(/""/g, '"') : match[2];
+      row.push(value);
+    }
+    return row;
+  });
+}
+
+/**
+ * 指定されたGoogleドライブフォルダ内の自己評価シート（CSVファイル）を読み込み、
+ * その内容を匿名化してGeminiに分析させ、結果をChatworkで通知する。
+ */
+function processSelfEvaluationSheets() {
+  const folderId = getSelfEvaluationFolderId();
+  const nameColumnHeader = getSelfEvaluationNameColumnHeader();
+  const roomIds = getChatworkTargetRoomIds();
+  const managerRoomId = roomIds.manager;
+
+  if (!managerRoomId) {
+    Logger.log("マネージャーのChatworkルームIDが設定されていません。自己評価シート分析結果の通知をスキップします。");
+    return;
+  }
+
+  try {
+    const folder = DriveApp.getFolderById(folderId);
+    const files = folder.getFilesByType(MimeType.CSV);
+
+    if (!files.hasNext()) {
+      Logger.log(`指定されたフォルダ（ID: ${folderId}）にCSVファイルが見つかりませんでした。`);
+      SpreadsheetApp.getUi().alert('自己評価シート分析', `指定されたフォルダにCSVファイルが見つかりませんでした。`, SpreadsheetApp.getUi().ButtonSet.OK);
+      return;
+    }
+
+    while (files.hasNext()) {
+      const file = files.next();
+      if (!file.getName().includes('自己評価')) {
+        Logger.log(`ファイル名に「自己評価」を含まないためスキップ: ${file.getName()}`);
+        continue;
+      }
+
+      Logger.log(`自己評価シートを処理中: ${file.getName()}`);
+      const csvContent = file.getBlob().getDataAsString();
+      const data = parseCsvData(csvContent);
+
+      if (data.length < 2) {
+        Logger.log(`ヘッダー行のみ、またはデータがないためスキップ: ${file.getName()}`);
+        continue;
+      }
+
+      const headers = data[0];
+      const nameColumnIndex = headers.indexOf(nameColumnHeader);
+
+      if (nameColumnIndex === -1) {
+        Logger.log(`CSVファイル「${file.getName()}」に氏名列（ヘッダー: ${nameColumnHeader}）が見つかりませんでした。スキップします。`);
+        continue;
+      }
+
+      // ヘッダー行を除いたデータ行を処理
+      for (let i = 1; i < data.length; i++) {
+        const row = data[i];
+        const originalName = row[nameColumnIndex];
+        const anonymousName = originalName ? `提出者_${i}` : '提出者'; // 匿名化
+        
+        let promptData = '';
+        // 氏名列以外のデータをプロンプトに含める
+        headers.forEach((header, index) => {
+          if (index !== nameColumnIndex) {
+            promptData += `${header}: ${row[index] || ''}\n`;
+          }
+        });
+
+        const geminiPrompt = `以下の${anonymousName}さんの自己評価コメントを分析し、強み、改善点、今後の成長領域について簡潔にまとめてください。各項目とそのコメントを考慮してください。
+
+自己評価データ：
+${promptData}`;
+
+        try {
+          const geminiResponse = callGeminiApi(geminiPrompt);
+          const analysisResult = geminiResponse.candidates[0].content.parts[0].text;
+
+          const subject = `【自己評価シート分析結果】${anonymousName}さん向け`;
+          const body = `[info]\n[title]${subject}[/title]\n${analysisResult}\n[/info]`;
+
+          sendChatworkNotification(managerRoomId, body);
+          Logger.log(`${anonymousName}さんの自己評価シート分析結果をChatworkに通知しました。`);
+
+        } catch (error) {
+          Logger.log(`Gemini API呼び出しまたはChatwork通知に失敗しました（${anonymousName}さん）: ${error.message}`);
+        }
+      }
+    }
+    SpreadsheetApp.getUi().alert('自己評価シート分析', '自己評価シートの分析と通知が完了しました。', SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    Logger.log(`自己評価シート処理中にエラーが発生しました: ${e.message}`);
+    SpreadsheetApp.getUi().alert('エラー', `自己評価シート処理中にエラーが発生しました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
   }
 }
 
