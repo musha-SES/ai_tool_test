@@ -12,7 +12,7 @@ function onOpen() {
     .addSeparator()
     .addItem('自己評価シート分析', 'processSelfEvaluationSheets')
     .addSeparator()
-    .addItem('1on1ヒアリング項目生成', 'generate1on1Topics')
+    .addItem('1on1ヒアリング項目生成', 'promptForEmployeeNameAndGenerateTopics')
     .addToUi();
 }
 
@@ -987,8 +987,35 @@ function getSelfEvaluationDataForEmployee(employeeName) {
  * 日報ログと自己評価シートを総合的に分析し、1on1ヒアリング項目を生成する。
  * 全社員を対象に実行される。
  */
-function generate1on1Topics() {
-  const employeeNames = getAllEmployeeNames();
+/**
+ * ユーザーに社員名を入力させ、その社員の1on1ヒアリング項目を生成する。
+ */
+function promptForEmployeeNameAndGenerateTopics() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt(
+    '1on1ヒアリング項目生成',
+    'ヒアリング項目を生成する社員の名前を入力してください。',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() === ui.Button.OK) {
+    const employeeName = response.getResponseText();
+    if (employeeName) {
+      generate1on1Topics(employeeName);
+    } else {
+      ui.alert('エラー', '社員名が入力されていません。処理を中止します。', ui.ButtonSet.OK);
+    }
+  } else {
+    ui.alert('情報', '処理がキャンセルされました。', ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * 日報ログと自己評価シートを総合的に分析し、1on1ヒアリング項目を生成する。
+ * @param {string} [targetEmployeeName=null] 特定の社員名を指定する場合。指定しない場合は全社員を対象。
+ */
+function generate1on1Topics(targetEmployeeName = null) {
+  const employeeNames = targetEmployeeName ? [targetEmployeeName] : getAllEmployeeNames();
   const roomIds = getChatworkTargetRoomIds();
   const managerRoomId = roomIds.manager;
 
@@ -1012,14 +1039,14 @@ function generate1on1Topics() {
     let promptDailyReports = 'データなし';
     if (dailyReports.length > 0) {
       promptDailyReports = dailyReports.map(report => 
-        `状態: ${report.aiStatus}, 理由: ${report.aiReason}`
+        `業務内容: ${truncateText(report.workContent, MAX_PROMPT_TEXT_LENGTH)}, 気分: ${report.mood}, 困っていること: ${truncateText(report.problems, MAX_PROMPT_TEXT_LENGTH)}, AI状態: ${report.aiStatus}, AI理由: ${truncateText(report.aiReason, MAX_PROMPT_TEXT_LENGTH)}`
       ).join('\n');
     }
 
     let promptSelfEvaluation = 'データなし';
     if (selfEvaluation) {
       promptSelfEvaluation = Object.entries(selfEvaluation).map(([key, value]) => 
-        `${key}: ${value}`
+        `${key}: ${truncateText(value, MAX_PROMPT_TEXT_LENGTH)}`
       ).join('\n');
     }
 
@@ -1034,10 +1061,8 @@ ${promptDailyReports}
 ${promptSelfEvaluation}`;
 
     try {
-      // const geminiResponse = callGeminiApi(geminiPrompt);
-      // const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
-      Logger.log(`[Gemini呼び出しスキップ] ${employeeName}さんの1on1ヒアリング項目生成。ダミーデータを使用します。`);
-      const hearingTopics = `[Gemini呼び出し省略] 1on1ヒアリング項目のダミーリスト\n- ダミー質問1\n- ダミー質問2\n- ダミー質問3`;
+      const geminiResponse = callGeminiApi(geminiPrompt);
+      const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
 
       const subject = `【1on1ヒアリング項目提案】${employeeName}さん向け`;
       const body = `[info]\n[title]${subject}[/title]\n${hearingTopics}\n[/info]`;
