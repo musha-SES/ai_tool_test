@@ -428,9 +428,7 @@ function assessAndNotify(reportData) {
     Logger.log(`Gemini AIによる評価: 状態 - ${geminiStatus}, 理由 - ${geminiReason}`);
 
   } catch (error) {
-    Logger.log('Gemini API呼び出しまたは応答解析に失敗しました: ' + error.message);
-    // Gemini API呼び出し失敗は致命的なエラーとみなし、マネージャーに通知
-    notifyManagerOfSystemError('callGeminiApi', error.message, 'Gemini APIキーの有効性、またはAPIの応答形式を確認してください。');
+    Logger.log('Gemini API呼び出しまたは応答解析に失敗しました: ' + error.message + '. Gemini APIキーの有効性、またはAPIの応答形式を確認してください。');
   }
 
   if (geminiStatus === '危険' || geminiStatus === '少し悪い') {
@@ -472,9 +470,7 @@ function assessAndNotify(reportData) {
   try {
     logReportToSheet(reportData, geminiStatus, geminiReason);
   } catch (e) {
-    Logger.log('スプレッドシートへの日報ログ記録に失敗しました: ' + e.message);
-    // スプレッドシートへのログ記録失敗は致命的なエラーとみなし、マネージャーに通知
-    notifyManagerOfSystemError('logReportToSheet', e.message, '「日報ログ」シートが存在するか、アクセス権限を確認してください。');
+    Logger.log('スプレッドシートへの日報ログ記録に失敗しました: ' + e.message + '. 「日報ログ」シートが存在するか、アクセス権限を確認してください。');
   }
 }
 
@@ -586,8 +582,7 @@ function getBotChatworkAccountId() {
     Logger.log(`Chatwork APIからBOTアカウントIDを取得し、スクリプトプロパティに保存しました: ${botAccountId}`);
     return botAccountId;
   } catch (e) {
-    Logger.log(`BOTアカウントIDの取得に失敗しました: ${e.message}`);
-    notifyManagerOfSystemError('getBotChatworkAccountId', e.message, 'Chatwork APIキーが有効か、またはChatwork APIにアクセスできるか確認してください。');
+    Logger.log(`BOTアカウントIDの取得に失敗しました: ${e.message}. Chatwork APIキーが有効か、またはChatwork APIにアクセスできるか確認してください。`);
     throw e; // 呼び出し元で処理させる
   }
 }
@@ -730,32 +725,4 @@ function callGeminiApi(prompt) {
   }
 }
 
-/**
- * システムの致命的なエラーをマネージャーにChatworkで通知する。
- * @param {string} functionName エラーが発生した関数名
- * @param {string} errorMessage エラーメッセージ
- * @param {string} possibleCause 考えられる原因
- */
-function notifyManagerOfSystemError(functionName, errorMessage, possibleCause) {
-  Logger.log(`致命的なシステムエラーが発生しました。関数: ${functionName}, エラー: ${errorMessage}, 原因: ${possibleCause}`);
-  try {
-    const roomIds = getChatworkTargetRoomIds();
-    const managerRoomId = roomIds.manager;
 
-    if (!managerRoomId) {
-      Logger.log("マネージャーのChatworkルームIDが設定されていません。システムエラー通知をスキップします。");
-      return;
-    }
-
-    const subject = `【システムエラー】日報AIシステムに致命的な問題`;
-    const body = `[info]\n[title]${subject}[/title]\nエラー発生箇所: ${functionName}\nエラーメッセージ: ${errorMessage}\n考えられる原因: ${possibleCause}\n[hr]\nシステム管理者は速やかに対応してください。\n[/info]`;
-
-    // sendChatworkNotification自体がエラーをスローする可能性があるため、ここではtry-catchしない
-    // この関数が失敗した場合、Chatworkでの通知は不可能
-    sendChatworkNotification(managerRoomId, body);
-    Logger.log('マネージャーへのシステムエラー通知が正常に送信されました。');
-  } catch (e) {
-    Logger.log(`マネージャーへのシステムエラー通知の送信に失敗しました: ${e.message}`);
-    Logger.log('Chatwork APIキー、またはマネージャーのルームIDが正しく設定されているか確認してください。');
-  }
-}
