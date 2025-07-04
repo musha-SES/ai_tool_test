@@ -1,1 +1,0 @@
-refactor: Remove manager notification for critical system errors, log only
