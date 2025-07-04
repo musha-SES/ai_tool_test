@@ -223,14 +223,15 @@ function sendDailyReportQuestions() {
 本日の日報を以下のフォーマットでご返信ください。
 
 [info]
-#日報
-業務内容：
+[title]#日報[/title]
+[hr]
+[title]業務内容：[/title]
 （例：〇〇のタスクを完了しました。）
 
-気分：
+[title]気分：[/title]
 （良い/普通/悪い のいずれかでご記入ください）
 
-困っていること：
+[title]困っていること：[/title]
 （例：〇〇について相談したいです。特になければ「特になし」）
 [/info]`;
       try {
