@@ -218,14 +218,7 @@ function sendDailyReportQuestions() {
         continue; // 次のルームへ
       }
 
-      const message = `[To:${roomId}] ${name}さん
-おはようございます！
-本日の日報を以下のフォーマットでご返信ください。
-
-#日報
-業務内容：
-気分：(良い/普通/悪い)
-困っていること：`;
+      const message = `[To:${roomId}] ${name}さん\nおはようございます！\n本日の日報を以下のフォーマットでご返信ください。\n\n#日報\n業務内容：\n気分：(良い/普通/悪い)\n困っていること：`;
       try {
         const response = sendChatworkNotification(roomId, message);
         const messageId = response.message_id.toString();
@@ -294,7 +287,7 @@ function processChatworkReplies() {
 
             if (matchedQuestion) {
               // 日報フォーマットのチェック
-              if (msg.body.includes('#日報') && msg.body.includes('業務内容：') && msg.body.includes('気分：') && msg.body.includes('困っていること：')) {
+              if (msg.body.includes('#日報')) { // #日報ハッシュタグがあれば解析を試みる
                 const reportData = parseReportFromMessage(name, msg.body);
                 Logger.log(`--- Chatworkから日報データ抽出 (${name}) ---`);
                 Logger.log(JSON.stringify(reportData, null, 2));
@@ -384,9 +377,12 @@ function findLatestDailyReportReply(messages) {
  * @returns {Object} 日報データオブジェクト
  */
 function parseReportFromMessage(name, messageBody) {
-  const workContentMatch = messageBody.match(/業務内容：([\s\S]*?)(?=気分：)/);
-  const moodMatch = messageBody.match(/気分：([\s\S]*?)(?=困っていること：)/);
-  const problemsMatch = messageBody.match(/困っていること：([\s\S]*)/);
+  // 各項目を柔軟に抽出するための正規表現
+  // コロンの後に任意の空白文字（スペース、改行など）が0回以上続くことを許容
+  // 次の項目、または文字列の末尾までを内容として抽出
+  const workContentMatch = messageBody.match(/業務内容：\s*([\s\S]*?)(?=\n*気分：|\n*困っていること：|$)/);
+  const moodMatch = messageBody.match(/気分：\s*([\s\S]*?)(?=\n*困っていること：|$)/);
+  const problemsMatch = messageBody.match(/困っていること：\s*([\s\S]*)/);
 
   return {
     date: new Date().toLocaleString('ja-JP'),
@@ -405,14 +401,15 @@ function parseReportFromMessage(name, messageBody) {
 function validateDailyReport(reportData) {
   const moods = ['良い', '普通', '悪い'];
 
-  if (!reportData.name || reportData.name.trim() === 'N/A') {
+  if (!reportData.name || reportData.name.trim() === 'N/A' || reportData.name.trim() === '') {
     return { isValid: false, message: '氏名が空です。' };
   }
   if (!reportData.workContent || reportData.workContent.trim() === 'N/A' || reportData.workContent.trim() === '') {
     return { isValid: false, message: '業務内容が空です。' };
   }
+  // 気分のバリデーションを強化
   if (!reportData.mood || reportData.mood.trim() === 'N/A' || !moods.includes(reportData.mood.trim())) {
-    return { isValid: false, message: `気分に不正な値が入力されています。（${reportData.mood}）` };
+    return { isValid: false, message: `気分に不正な値が入力されています。「${reportData.mood}」。有効な値は「良い」「普通」「悪い」です。` };
   }
   // problemsは任意項目なのでバリデーションしない
 
@@ -427,9 +424,7 @@ function validateDailyReport(reportData) {
  * @param {Object} reportData 日報データ
  */
 function assessAndNotify(reportData) {
-  const geminiPrompt = `以下の日報の内容を分析し、提出者の現在の心理状態や業務の調子について、5段階（非常に良い、良い、普通、少し悪い、危険）で評価してください。\n**特に「今日の気分」が悪い場合や、「困っていること」にネガティブな兆候が見られる場合は「危険」と判断し、その理由も簡潔に述べてください。**\n氏名は匿名化し、「提出者」として言及してください。\n\n業務内容：${reportData.workContent}\n気分：${reportData.mood}\n困っていること：${reportData.problems}
-
-結果はJSON形式で返してください。例: { "status": "危険", "reason": "具体例：今日の気分が悪いと申告しており、困っている内容にXXとあるため。" }`;
+  const geminiPrompt = `以下の日報の内容を分析し、提出者の現在の心理状態や業務の調子について、5段階（非常に良い、良い、普通、少し悪い、危険）で評価してください。\n**特に「今日の気分」が悪い場合や、「困っていること」にネガティブな兆候が見られる場合は「危険」と判断し、その理由も簡潔に述べてください。**\n氏名は匿名化し、「提出者」として言及してください。\n\n業務内容：${reportData.workContent}\n気分：${reportData.mood}\n困っていること：${reportData.problems}\n\n結果はJSON形式で返してください。例: { "status": "危険", "reason": "具体例：今日の気分が悪いと申告しており、困っている内容にXXとあるため。" }`;
 
   let geminiStatus = '不明';
   let geminiReason = 'Gemini APIからの応答がありませんでした。';
@@ -453,6 +448,8 @@ function assessAndNotify(reportData) {
 
   } catch (error) {
     Logger.log('Gemini API呼び出しまたは応答解析に失敗しました: ' + error.message);
+    // Gemini API呼び出し失敗は致命的なエラーとみなし、マネージャーに通知
+    notifyManagerOfSystemError('callGeminiApi', error.message, 'Gemini APIキーの有効性、またはAPIの応答形式を確認してください。');
   }
 
   if (geminiStatus === '危険' || geminiStatus === '少し悪い') {
@@ -465,36 +462,26 @@ function assessAndNotify(reportData) {
     }
 
     const subject = `【注意】日報から社員の調子に懸念 - ${reportData.name}`;
-    const body = `[info]
-` +
-                 `[title]${subject}[/title]
-` +
-                 `提出者：${reportData.name}
-` +
-                 `日付：${reportData.date}
-` +
-                 `Gemini AIによる評価：${geminiStatus}
-` +
-                 `理由：${geminiReason}
-` +
-                 `[hr]
-` +
-                 `▼ 日報抜粋
-` +
-                 `今日の気分：${reportData.mood}
-` +
-                 `困っていること：${reportData.problems}
-` +
-                 `[hr]
-` +
-                 `詳細については、スプレッドシートをご確認ください。
-` +
+    const body = `[info]\n` +
+                 `[title]${subject}[/title]\n` +
+                 `提出者：${reportData.name}\n` +
+                 `日付：${reportData.date}\n` +
+                 `Gemini AIによる評価：${geminiStatus}\n` +
+                 `理由：${geminiReason}\n` +
+                 `[hr]\n` +
+                 `▼ 日報抜粋\n` +
+                 `今日の気分：${reportData.mood}\n` +
+                 `困っていること：${reportData.problems}\n` +
+                 `[hr]\n` +
+                 `詳細については、スプレッドシートをご確認ください。\n` +
                  `[/info]`;
     try {
       sendChatworkNotification(managerRoomId, body);
       Logger.log('Chatworkへの注意通知が正常に送信されました。');
     } catch (e) {
       Logger.log('Chatworkへの注意通知の送信に失敗しました: ' + e.message);
+      // Chatwork通知自体が失敗した場合、マネージャーへの通知はできないためログのみ
+      Logger.log('Chatworkへの注意通知の送信に失敗しました。Chatwork APIキーまたはルームIDを確認してください。');
     }
   } else {
     Logger.log(`社員の調子は「${geminiStatus}」と判断されました。Chatwork通知は行いません。`);
@@ -505,6 +492,8 @@ function assessAndNotify(reportData) {
     logReportToSheet(reportData, geminiStatus, geminiReason);
   } catch (e) {
     Logger.log('スプレッドシートへの日報ログ記録に失敗しました: ' + e.message);
+    // スプレッドシートへのログ記録失敗は致命的なエラーとみなし、マネージャーに通知
+    notifyManagerOfSystemError('logReportToSheet', e.message, '「日報ログ」シートが存在するか、アクセス権限を確認してください。');
   }
 }
 
@@ -516,24 +505,29 @@ function assessAndNotify(reportData) {
  */
 function logReportToSheet(reportData, status, reason) {
   const logSheetName = '日報ログ';
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(logSheetName);
-  if (!sheet) {
-    throw new Error(`シート「${logSheetName}」が見つかりません。`);
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(logSheetName);
+    if (!sheet) {
+      throw new Error(`シート「${logSheetName}」が見つかりません。`);
+    }
+
+    const logData = [
+      new Date(), // タイムスタンプ
+      reportData.name,
+      reportData.date,
+      reportData.workContent,
+      reportData.mood,
+      reportData.problems,
+      status,
+      reason
+    ];
+
+    sheet.appendRow(logData);
+    Logger.log(`日報データを「${logSheetName}」シートに記録しました。`);
+  } catch (e) {
+    // ここでのエラーはassessAndNotifyでキャッチされ、マネージャーに通知される
+    throw e; // 再スローしてassessAndNotifyで処理させる
   }
-
-  const logData = [
-    new Date(), // タイムスタンプ
-    reportData.name,
-    reportData.date,
-    reportData.workContent,
-    reportData.mood,
-    reportData.problems,
-    status,
-    reason
-  ];
-
-  sheet.appendRow(logData);
-  Logger.log(`日報データを「${logSheetName}」シートに記録しました。`);
 }
 
 /**
@@ -543,51 +537,87 @@ function logReportToSheet(reportData, status, reason) {
  * @returns {Object} Chatwork APIからのレスポンスオブジェクト
  */
 function sendChatworkNotification(roomId, message) {
-  const apiKey = getChatworkApiKey();
-  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
+  try {
+    const apiKey = getChatworkApiKey();
+    const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
 
-  const payload = {
-    body: message,
-    self_unread: 1 // 自分にも未読にする
-  };
+    const payload = {
+      body: message,
+      self_unread: 1 // 自分にも未読にする
+    };
 
-  const options = {
-    method: 'post',
-    headers: { 'X-ChatWorkToken': apiKey },
-    contentType: 'application/x-www-form-urlencoded',
-    payload: Object.keys(payload).map(key => `${key}=${encodeURIComponent(payload[key])}`).join('&'),
-    muteHttpExceptions: true
-  };
+    const options = {
+      method: 'post',
+      headers: { 'X-ChatWorkToken': apiKey },
+      contentType: 'application/x-www-form-urlencoded',
+      payload: Object.keys(payload).map(key => `${key}=${encodeURIComponent(payload[key])}`).join('&'),
+      muteHttpExceptions: true
+    };
 
-  const response = UrlFetchApp.fetch(url, options);
-  const responseCode = response.getResponseCode();
-  const responseText = response.getContentText();
+    const response = UrlFetchApp.fetch(url, options);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
 
-  if (responseCode !== 200) {
-    throw new Error(`Chatwork APIへのメッセージ送信に失敗しました。Status: ${responseCode}, Response: ${responseText}`);
+    if (responseCode !== 200) {
+      throw new Error(`Chatwork APIへのメッセージ送信に失敗しました。Status: ${responseCode}, Response: ${responseText}`);
+    }
+    return JSON.parse(responseText); // レスポンス全体を返す
+  } catch (e) {
+    // sendChatworkNotification自体が失敗した場合、これ以上Chatworkで通知はできないため、ログのみ
+    Logger.log(`sendChatworkNotificationでエラーが発生しました: ${e.message}`);
+    throw e; // 呼び出し元で処理させる
   }
-  return JSON.parse(responseText); // レスポンス全体を返す
 }
+
+const CHATWORK_BOT_ACCOUNT_ID_KEY = 'CHATWORK_BOT_ACCOUNT_ID';
 
 /**
  * BOT自身（APIトークン所有者）のChatworkアカウントIDを取得する。
+ * スクリプトプロパティに保存されていればそこから読み込み、なければAPIを呼び出して保存する。
  * @returns {string} BOTのChatworkアカウントID
  */
 function getBotChatworkAccountId() {
-  const apiKey = getChatworkApiKey();
-  const url = 'https://api.chatwork.com/v2/me';
-  const options = {
-    method: 'get',
-    headers: { 'X-ChatWorkToken': apiKey },
-    muteHttpExceptions: true
-  };
-  const response = UrlFetchApp.fetch(url, options);
-  const responseCode = response.getResponseCode();
-  if (responseCode !== 200) {
-    throw new Error(`Chatwork API (me) からアカウントIDの取得に失敗しました。Status: ${responseCode}, Response: ${response.getContentText()}`);
+  const properties = PropertiesService.getScriptProperties();
+  let botAccountId = properties.getProperty(CHATWORK_BOT_ACCOUNT_ID_KEY);
+
+  if (botAccountId) {
+    Logger.log(`スクリプトプロパティからBOTアカウントIDを取得しました: ${botAccountId}`);
+    return botAccountId;
   }
-  const me = JSON.parse(response.getContentText());
-  return me.account_id.toString();
+
+  Logger.log('スクリプトプロパティにBOTアカウントIDが見つかりませんでした。Chatwork APIから取得します。');
+  try {
+    const apiKey = getChatworkApiKey();
+    const url = 'https://api.chatwork.com/v2/me';
+    const options = {
+      method: 'get',
+      headers: { 'X-ChatWorkToken': apiKey },
+      muteHttpExceptions: true
+    };
+    const response = UrlFetchApp.fetch(url, options);
+    const responseCode = response.getResponseCode();
+    if (responseCode !== 200) {
+      throw new Error(`Chatwork API (me) からアカウントIDの取得に失敗しました。Status: ${responseCode}, Response: ${response.getContentText()}`);
+    }
+    const me = JSON.parse(response.getContentText());
+    botAccountId = me.account_id.toString();
+    setChatworkBotAccountId(botAccountId); // 取得したIDをスクリプトプロパティに保存
+    Logger.log(`Chatwork APIからBOTアカウントIDを取得し、スクリプトプロパティに保存しました: ${botAccountId}`);
+    return botAccountId;
+  } catch (e) {
+    Logger.log(`BOTアカウントIDの取得に失敗しました: ${e.message}`);
+    notifyManagerOfSystemError('getBotChatworkAccountId', e.message, 'Chatwork APIキーが有効か、またはChatwork APIにアクセスできるか確認してください。');
+    throw e; // 呼び出し元で処理させる
+  }
+}
+
+/**
+ * BOTアカウントIDをスクリプトプロパティに保存する。
+ * @param {string} accountId 保存するアカウントID
+ */
+function setChatworkBotAccountId(accountId) {
+  PropertiesService.getScriptProperties().setProperty(CHATWORK_BOT_ACCOUNT_ID_KEY, accountId);
+  Logger.log(`BOTアカウントID ${accountId} をスクリプトプロパティに保存しました。`);
 }
 
 /**
@@ -683,33 +713,68 @@ function getGeminiApiKey() {
  * @returns {Object} Geminiからの生のJSON応答オブジェクト
  */
 function callGeminiApi(prompt) {
-  const apiKey = getGeminiApiKey();
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  try {
+    const apiKey = getGeminiApiKey();
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-  const requestBody = {
-    contents: [{ parts: [{ text: prompt }] }]
-  };
+    const requestBody = {
+      contents: [{ parts: [{ text: prompt }] }]
+    };
 
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(requestBody),
-    muteHttpExceptions: true,
-  };
+    const options = {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(requestBody),
+      muteHttpExceptions: true,
+    };
 
-  Logger.log('Gemini APIに送信するプロンプト: ' + prompt);
+    Logger.log('Gemini APIに送信するプロンプト: ' + prompt);
 
-  const response = UrlFetchApp.fetch(apiUrl, options);
-  const responseCode = response.getResponseCode();
-  const responseText = response.getContentText();
+    const response = UrlFetchApp.fetch(apiUrl, options);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
 
-  if (responseCode === 200) {
-    try {
-      return JSON.parse(responseText);
-    } catch (e) {
-      throw new Error('Gemini API returned invalid JSON: ' + responseText);
+    if (responseCode === 200) {
+      try {
+        return JSON.parse(responseText);
+      } catch (e) {
+        throw new Error('Gemini API returned invalid JSON: ' + responseText);
+      }
+    } else {
+      throw new Error(`Gemini API呼び出しが失敗しました。HTTPステータスコード: ${responseCode}, 応答: ${responseText}`);
     }
-  } else {
-    throw new Error(`Gemini API呼び出しが失敗しました。HTTPステータスコード: ${responseCode}, 応答: ${responseText}`);
+  } catch (e) {
+    // ここでのエラーはassessAndNotifyでキャッチされ、マネージャーに通知される
+    throw e; // 再スローしてassessAndNotifyで処理させる
+  }
+}
+
+/**
+ * システムの致命的なエラーをマネージャーにChatworkで通知する。
+ * @param {string} functionName エラーが発生した関数名
+ * @param {string} errorMessage エラーメッセージ
+ * @param {string} possibleCause 考えられる原因
+ */
+function notifyManagerOfSystemError(functionName, errorMessage, possibleCause) {
+  Logger.log(`致命的なシステムエラーが発生しました。関数: ${functionName}, エラー: ${errorMessage}, 原因: ${possibleCause}`);
+  try {
+    const roomIds = getChatworkTargetRoomIds();
+    const managerRoomId = roomIds.manager;
+
+    if (!managerRoomId) {
+      Logger.log("マネージャーのChatworkルームIDが設定されていません。システムエラー通知をスキップします。");
+      return;
+    }
+
+    const subject = `【システムエラー】日報AIシステムに致命的な問題`;
+    const body = `[info]\n[title]${subject}[/title]\nエラー発生箇所: ${functionName}\nエラーメッセージ: ${errorMessage}\n考えられる原因: ${possibleCause}\n[hr]\nシステム管理者は速やかに対応してください。\n[/info]`;
+
+    // sendChatworkNotification自体がエラーをスローする可能性があるため、ここではtry-catchしない
+    // この関数が失敗した場合、Chatworkでの通知は不可能
+    sendChatworkNotification(managerRoomId, body);
+    Logger.log('マネージャーへのシステムエラー通知が正常に送信されました。');
+  } catch (e) {
+    Logger.log(`マネージャーへのシステムエラー通知の送信に失敗しました: ${e.message}`);
+    Logger.log('Chatwork APIキー、またはマネージャーのルームIDが正しく設定されているか確認してください。');
   }
 }
