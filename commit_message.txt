@@ -1,1 +1,1 @@
-refactor: Remove Google Form integration and related documentation
+refactor: Remove manager notification for critical system errors, log only
