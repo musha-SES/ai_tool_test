@@ -918,73 +918,7 @@ function getDailyReportDataForEmployee(employeeName, limit = 5) {
   return employeeReports.reverse(); // 古い順に戻す
 }
 
-/**
- * 指定された社員の自己評価シートデータを取得する。
- * @param {string} employeeName 社員名
- * @returns {Object|null} 自己評価シートデータ（オブジェクト形式）
- */
-function getSelfEvaluationDataForEmployee(employeeName) {
-  const folderId = getSelfEvaluationFolderId();
-  const lowerCaseEmployeeName = employeeName.trim().toLowerCase();
 
-  try {
-    const folder = DriveApp.getFolderById(folderId);
-    const files = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
-
-    while (files.hasNext()) {
-      const file = files.next();
-      // ファイル名に「自己評価」を含み、かつ社員名が含まれるファイルを検索
-      if (file.getName().includes('自己評価') && file.getName().toLowerCase().includes(lowerCaseEmployeeName)) {
-        Logger.log(`自己評価シートを読み込み中: ${file.getName()}`);
-        let spreadsheet;
-        try {
-          spreadsheet = SpreadsheetApp.openById(file.getId());
-        } catch (e) {
-          Logger.log(`スプレッドシート「${file.getName()}」のオープンに失敗しました: ${e.message}`);
-          continue;
-        }
-
-        const sheet = spreadsheet.getSheets()[0]; // 最初のシートを対象
-        const data = sheet.getDataRange().getValues();
-
-        if (data.length < 2) {
-          Logger.log(`ヘッダー行のみ、またはデータがないためスキップ: ${file.getName()}`);
-          continue;
-        }
-
-        const headers = data[0];
-        // 「項目」列のインデックスを特定（自己評価シートの構造を仮定）
-        const itemColumnIndex = headers.indexOf('項目'); 
-        if (itemColumnIndex === -1) {
-            Logger.log(`スプレッドシート「${file.getName()}」に「項目」列が見つかりませんでした。スキップします。`);
-            continue;
-        }
-
-        const evaluationData = [];
-        // ヘッダー行を除いたデータ行を処理
-        for (let i = 1; i < data.length; i++) {
-          const row = data[i];
-          const item = row[itemColumnIndex];
-          if (item) { // 項目名が存在する場合のみ処理
-            const rowData = { "項目": item };
-            headers.forEach((header, index) => {
-              if (index !== itemColumnIndex) { // 項目列以外を抽出
-                rowData[header] = row[index] || '';
-              }
-            });
-            evaluationData.push(rowData);
-          }
-        }
-        Logger.log(`${employeeName}さんの自己評価シート（${file.getName()}）を読み込みました。`);
-        return evaluationData; // 構造化されたデータを返す
-      }
-    }
-  }
-  catch (e) {
-    Logger.log(`自己評価シートの取得中にエラーが発生しました: ${e.message}`);
-  }
-  return null;
-}
 
 /**
  * プロンプトに含めるテキストの最大長。
@@ -1034,10 +968,9 @@ function generate1on1Topics() {
 
   Logger.log(`TARGET_EMPLOYEE_NAME_FOR_1ON1で指定された${targetEmployeeName}さんの1on1ヒアリング項目生成を開始します。`);
   const dailyReports = getDailyReportDataForEmployee(targetEmployeeName, 5); // 直近5件の日報
-  const selfEvaluation = getSelfEvaluationDataForEmployee(targetEmployeeName);
 
-  if (dailyReports.length === 0 && !selfEvaluation) {
-      const infoMessage = `「${targetEmployeeName}」さんの日報ログまたは自己評価シートのデータが見つかりませんでした。`;
+  if (dailyReports.length === 0) {
+      const infoMessage = `「${targetEmployeeName}」さんの日報ログデータが見つかりませんでした。`;
       Logger.log(infoMessage);
       ui.alert('情報', infoMessage + 'ヒアリング項目は生成されません。', ui.ButtonSet.OK);
       return;
@@ -1050,47 +983,36 @@ function generate1on1Topics() {
     ).join('\n');
   }
 
-  let promptSelfEvaluation = 'データなし';
-  if (selfEvaluation && selfEvaluation.length > 0) {
-    promptSelfEvaluation = selfEvaluation.map(item => {
-      let itemString = `項目: ${truncateText(item['項目'], MAX_PROMPT_TEXT_LENGTH)}`;
-      for (const key in item) {
-        if (key !== '項目') {
-          itemString += `, ${key}: ${truncateText(item[key], MAX_PROMPT_TEXT_LENGTH)}`;
-        }
-      }
-      return itemString;
-    }).join('\n');
-  }
-
   const anonymousName = `対象者`; // 固有名詞を削除
 
-  const geminiPrompt = `以下の対象者の日報データと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが対象者にヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。
+  const geminiPrompt = `以下の${anonymousName}さんの直近の日報データを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。特に、日報で示されたコンディションの傾向、過去に「危険」や「少し悪い」と判断された点、困っている内容に焦点を当ててください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。
 
 **直近の日報データ：**
 ${promptDailyReports}
 
-**自己評価シートの主要項目：**
-${promptSelfEvaluation}`;
+**自己評価シートデータ：**
+データなし`;
 
   Logger.log('Geminiに送信される最終プロンプト:\n' + geminiPrompt); // 最終プロンプトの全文をログに出力
 
-  // try {
-  //   const geminiResponse = callGeminiApi(geminiPrompt);
-  //   const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
+  try {
+    const geminiResponse = callGeminiApi(geminiPrompt);
+    const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
 
-  //   const subject = `【1on1ヒアリング項目提案】${targetEmployeeName}さん向け`;
-  //   const body = `[info]\n[title]${subject}[/title]\n${hearingTopics}\n[/info]`;
+    const subject = `【1on1ヒアリング項目提案】${targetEmployeeName}さん向け`;
+    const body = `[info]\n[title]${subject}[/title]\n${hearingTopics}\n[/info]`;
 
-  //   sendChatworkNotification(managerRoomId, body);
-  //   Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
-  //   ui.alert('完了', `${targetEmployeeName}さんの1on1ヒアリング項目生成と通知が完了しました。`, SpreadsheetApp.getUi().ButtonSet.OK);
+    sendChatworkNotification(managerRoomId, body);
+    Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
+    ui.alert('完了', `${targetEmployeeName}さんの1on1ヒアリング項目生成と通知が完了しました。`, SpreadsheetApp.getUi().ButtonSet.OK);
 
-  // } catch (error) {
-  //   const errorMessage = `${targetEmployeeName}さんの1on1ヒアリング項目生成中にエラーが発生しました: ${error.message}`;
-  //   Logger.log(`Gemini API呼び出しまたはChatwork通知に失敗しました（${targetEmployeeName}さん）: ${error.message}`);
-  //   ui.alert('エラー', errorMessage, SpreadsheetApp.getUi().ButtonSet.OK);
-  // }
+  } catch (error) {
+    const errorMessage = `${targetEmployeeName}さんの1on1ヒアリング項目生成中にエラーが発生しました: ${error.message}`;
+    Logger.log(`Chatwork通知に失敗しました（${targetEmployeeName}さん）: ${error.message}`);
+    ui.alert('エラー', errorMessage, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
 }
+
+
 
 
