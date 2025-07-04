@@ -925,7 +925,6 @@ function getDailyReportDataForEmployee(employeeName, limit = 5) {
  */
 function getSelfEvaluationDataForEmployee(employeeName) {
   const folderId = getSelfEvaluationFolderId();
-  const nameColumnHeader = getSelfEvaluationNameColumnHeader();
   const lowerCaseEmployeeName = employeeName.trim().toLowerCase();
 
   try {
@@ -954,32 +953,30 @@ function getSelfEvaluationDataForEmployee(employeeName) {
         }
 
         const headers = data[0];
-        const nameColumnIndex = headers.indexOf(nameColumnHeader);
-
-        if (nameColumnIndex === -1) {
-          Logger.log(`スプレッドシート「${file.getName()}」に氏名列（ヘッダー: ${nameColumnHeader}）が見つかりませんでした。スキップします。`);
-          continue;
+        // 「項目」列のインデックスを特定（自己評価シートの構造を仮定）
+        const itemColumnIndex = headers.indexOf('項目'); 
+        if (itemColumnIndex === -1) {
+            Logger.log(`スプレッドシート「${file.getName()}」に「項目」列が見つかりませんでした。スキップします。`);
+            continue;
         }
 
+        const evaluationData = [];
         // ヘッダー行を除いたデータ行を処理
         for (let i = 1; i < data.length; i++) {
           const row = data[i];
-          if (row[nameColumnIndex] && row[nameColumnIndex].toString().trim().toLowerCase() === lowerCaseEmployeeName) { // 氏名が一致する行を検索
-            const evaluationData = {};
-            const targetHeaders = [
-              '本人から', 'マネージャから', '自己評価', 'マネージャ評価',
-              '来季目標', '目標達成のためにサポートしてほしい事', 'サポート方針', '目標グレード'
-            ];
-
+          const item = row[itemColumnIndex];
+          if (item) { // 項目名が存在する場合のみ処理
+            const rowData = { "項目": item };
             headers.forEach((header, index) => {
-              if (targetHeaders.includes(header)) {
-                evaluationData[header] = row[index] || '';
+              if (index !== itemColumnIndex) { // 項目列以外を抽出
+                rowData[header] = row[index] || '';
               }
             });
-            Logger.log(`${employeeName}さんの自己評価シート（${file.getName()}）を読み込みました。`);
-            return evaluationData; // 該当社員の自己評価データを返す
+            evaluationData.push(rowData);
           }
         }
+        Logger.log(`${employeeName}さんの自己評価シート（${file.getName()}）を読み込みました。`);
+        return evaluationData; // 構造化されたデータを返す
       }
     }
   }
@@ -1054,10 +1051,16 @@ function generate1on1Topics() {
   }
 
   let promptSelfEvaluation = 'データなし';
-  if (selfEvaluation) {
-    promptSelfEvaluation = Object.entries(selfEvaluation).map(([key, value]) => 
-      `${key}: ${truncateText(value, MAX_PROMPT_TEXT_LENGTH)}`
-    ).join('\n');
+  if (selfEvaluation && selfEvaluation.length > 0) {
+    promptSelfEvaluation = selfEvaluation.map(item => {
+      let itemString = `項目: ${truncateText(item['項目'], MAX_PROMPT_TEXT_LENGTH)}`;
+      for (const key in item) {
+        if (key !== '項目') {
+          itemString += `, ${key}: ${truncateText(item[key], MAX_PROMPT_TEXT_LENGTH)}`;
+        }
+      }
+      return itemString;
+    }).join('\n');
   }
 
   const anonymousName = `対象者`; // 固有名詞を削除
@@ -1070,22 +1073,24 @@ ${promptDailyReports}
 **自己評価シートの主要項目：**
 ${promptSelfEvaluation}`;
 
-  try {
-    const geminiResponse = callGeminiApi(geminiPrompt);
-    const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
+  Logger.log('Geminiに送信される最終プロンプト:\n' + geminiPrompt); // 最終プロンプトの全文をログに出力
 
-    const subject = `【1on1ヒアリング項目提案】${targetEmployeeName}さん向け`;
-    const body = `[info]\n[title]${subject}[/title]\n${hearingTopics}\n[/info]`;
+  // try {
+  //   const geminiResponse = callGeminiApi(geminiPrompt);
+  //   const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
 
-    sendChatworkNotification(managerRoomId, body);
-    Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
-    ui.alert('完了', `${targetEmployeeName}さんの1on1ヒアリング項目生成と通知が完了しました。`, SpreadsheetApp.getUi().ButtonSet.OK);
+  //   const subject = `【1on1ヒアリング項目提案】${targetEmployeeName}さん向け`;
+  //   const body = `[info]\n[title]${subject}[/title]\n${hearingTopics}\n[/info]`;
 
-  } catch (error) {
-    const errorMessage = `${targetEmployeeName}さんの1on1ヒアリング項目生成中にエラーが発生しました: ${error.message}`;
-    Logger.log(`Gemini API呼び出しまたはChatwork通知に失敗しました（${targetEmployeeName}さん）: ${error.message}`);
-    ui.alert('エラー', errorMessage, SpreadsheetApp.getUi().ButtonSet.OK);
-  }
+  //   sendChatworkNotification(managerRoomId, body);
+  //   Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
+  //   ui.alert('完了', `${targetEmployeeName}さんの1on1ヒアリング項目生成と通知が完了しました。`, SpreadsheetApp.getUi().ButtonSet.OK);
+
+  // } catch (error) {
+  //   const errorMessage = `${targetEmployeeName}さんの1on1ヒアリング項目生成中にエラーが発生しました: ${error.message}`;
+  //   Logger.log(`Gemini API呼び出しまたはChatwork通知に失敗しました（${targetEmployeeName}さん）: ${error.message}`);
+  //   ui.alert('エラー', errorMessage, SpreadsheetApp.getUi().ButtonSet.OK);
+  // }
 }
 
 
