@@ -899,9 +899,11 @@ function getDailyReportDataForEmployee(employeeName, limit = 5) {
   }
 
   const employeeReports = [];
+  const lowerCaseEmployeeName = employeeName.trim().toLowerCase();
+
   for (let i = values.length - 1; i >= 1; i--) { // 最新の日報から遡る
     const row = values[i];
-    if (row[1] === employeeName) { // 氏名列 (B列)
+    if (row[1] && row[1].toString().trim().toLowerCase() === lowerCaseEmployeeName) { // 氏名列 (B列)
       employeeReports.push({
         workContent: row[3], // 今日の業務内容 (D列)
         problems: row[5],    // 困っていること (F列)
@@ -912,6 +914,7 @@ function getDailyReportDataForEmployee(employeeName, limit = 5) {
       }
     }
   }
+  Logger.log(`${employeeName}さんの日報ログデータを${employeeReports.length}件取得しました。`);
   return employeeReports.reverse(); // 古い順に戻す
 }
 
@@ -923,6 +926,7 @@ function getDailyReportDataForEmployee(employeeName, limit = 5) {
 function getSelfEvaluationDataForEmployee(employeeName) {
   const folderId = getSelfEvaluationFolderId();
   const nameColumnHeader = getSelfEvaluationNameColumnHeader();
+  const lowerCaseEmployeeName = employeeName.trim().toLowerCase();
 
   try {
     const folder = DriveApp.getFolderById(folderId);
@@ -931,7 +935,7 @@ function getSelfEvaluationDataForEmployee(employeeName) {
     while (files.hasNext()) {
       const file = files.next();
       // ファイル名に「自己評価」を含み、かつ社員名が含まれるファイルを検索
-      if (file.getName().includes('自己評価') && file.getName().includes(employeeName)) {
+      if (file.getName().includes('自己評価') && file.getName().toLowerCase().includes(lowerCaseEmployeeName)) {
         Logger.log(`自己評価シートを読み込み中: ${file.getName()}`);
         let spreadsheet;
         try {
@@ -960,7 +964,7 @@ function getSelfEvaluationDataForEmployee(employeeName) {
         // ヘッダー行を除いたデータ行を処理
         for (let i = 1; i < data.length; i++) {
           const row = data[i];
-          if (row[nameColumnIndex] === employeeName) { // 氏名が一致する行を検索
+          if (row[nameColumnIndex] && row[nameColumnIndex].toString().trim().toLowerCase() === lowerCaseEmployeeName) { // 氏名が一致する行を検索
             const evaluationData = {};
             const targetHeaders = [
               '本人から', 'マネージャから', '自己評価', 'マネージャ評価',
@@ -972,6 +976,7 @@ function getSelfEvaluationDataForEmployee(employeeName) {
                 evaluationData[header] = row[index] || '';
               }
             });
+            Logger.log(`${employeeName}さんの自己評価シート（${file.getName()}）を読み込みました。`);
             return evaluationData; // 該当社員の自己評価データを返す
           }
         }
@@ -1030,7 +1035,7 @@ function generate1on1Topics() {
     return;
   }
 
-  Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目を生成中...`);
+  Logger.log(`TARGET_EMPLOYEE_NAME_FOR_1ON1で指定された${targetEmployeeName}さんの1on1ヒアリング項目生成を開始します。`);
   const dailyReports = getDailyReportDataForEmployee(targetEmployeeName, 5); // 直近5件の日報
   const selfEvaluation = getSelfEvaluationDataForEmployee(targetEmployeeName);
 
