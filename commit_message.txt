@@ -1,1 +1,1 @@
-feat: Change self-evaluation sheet processing from CSV to Google Sheets
+feat: Implement 1on1 hearing topic generation from daily reports and self-evaluations

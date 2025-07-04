@@ -1027,8 +1027,10 @@ function generate1on1Topics() {
     const geminiPrompt = `以下の${anonymousName}さんの直近の日報データと、自己評価シートの情報を総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。特に、日報で示されたコンディションの傾向、過去に「危険」や「少し悪い」と判断された点、困っている内容、そして自己評価シートから読み取れる強み、課題、成長領域に焦点を当ててください。質問は具体的で、部下の心情に寄り添うような形式にしてください。提案は箇条書き形式でお願いします.\n\n**直近の日報データ（抜粋）：**\n${promptDailyReports}\n\n**自己評価シートデータ：**\n${promptSelfEvaluation}`;
 
     try {
-      const geminiResponse = callGeminiApi(geminiPrompt);
-      const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
+      // const geminiResponse = callGeminiApi(geminiPrompt);
+      // const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
+      Logger.log(`[Gemini呼び出しスキップ] ${employeeName}さんの1on1ヒアリング項目生成。ダミーデータを使用します。`);
+      const hearingTopics = `[Gemini呼び出し省略] 1on1ヒアリング項目のダミーリスト\n- ダミー質問1\n- ダミー質問2\n- ダミー質問3`;
 
       const subject = `【1on1ヒアリング項目提案】${employeeName}さん向け`;
       const body = `[info]\n[title]${subject}[/title]\n${hearingTopics}\n[/info]`;
