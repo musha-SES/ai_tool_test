@@ -10,7 +10,7 @@ function onOpen() {
     .addItem('定期実行トリガーを設定', 'createDailyTriggers')
     .addItem('全てのトリガーを削除', 'deleteTriggers')
     .addSeparator()
-    .addItem('自己評価シート分析', 'processSelfEvaluationSheets')
+    
     .addSeparator()
     .addItem('1on1ヒアリング項目生成', 'generate1on1Topics')
     .addToUi();
@@ -729,130 +729,7 @@ function callGeminiApi(prompt) {
   }
 }
 
-// --- 自己評価シート分析機能 ---
 
-/**
- * 自己評価シート（CSVファイル）が格納されているGoogleドライブのフォルダIDをスクリプトプロパティから取得する。
- * @returns {string} GoogleドライブのフォルダID
- * @throws {Error} フォルダIDが設定されていない場合
- */
-function getSelfEvaluationFolderId() {
-  const folderId = PropertiesService.getScriptProperties().getProperty('SELF_EVALUATION_FOLDER_ID');
-  if (!folderId) {
-    throw new Error('SELF_EVALUATION_FOLDER_ID is not set in Script Properties.');
-  }
-  return folderId;
-}
-
-/**
- * 自己評価シートの氏名列のヘッダー名をスクリプトプロパティから取得する。
- * @returns {string} 氏名列のヘッダー名
- */
-function getSelfEvaluationNameColumnHeader() {
-  const header = PropertiesService.getScriptProperties().getProperty('SELF_EVALUATION_NAME_COLUMN_HEADER');
-  return header || '氏名'; // デフォルトは「氏名」
-}
-
-
-
-/**
- * 指定されたGoogleドライブフォルダ内の自己評価シート（Googleスプレッドシート）を読み込み、
- * その内容を匿名化してGeminiに分析させ、結果をChatworkで通知する。
- */
-function processSelfEvaluationSheets() {
-  const folderId = getSelfEvaluationFolderId();
-  const nameColumnHeader = getSelfEvaluationNameColumnHeader();
-  const roomIds = getChatworkTargetRoomIds();
-  const managerRoomId = roomIds.manager;
-
-  if (!managerRoomId) {
-    Logger.log("マネージャーのChatworkルームIDが設定されていません。自己評価シート分析結果の通知をスキップします。");
-    return;
-  }
-
-  try {
-    const folder = DriveApp.getFolderById(folderId);
-    const files = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
-
-    if (!files.hasNext()) {
-      Logger.log(`指定されたフォルダ（ID: ${folderId}）にGoogleスプレッドシートが見つかりませんでした。`);
-      SpreadsheetApp.getUi().alert('自己評価シート分析', `指定されたフォルダにGoogleスプレッドシートが見つかりませんでした。`, SpreadsheetApp.getUi().ButtonSet.OK);
-      return;
-    }
-
-    while (files.hasNext()) {
-      const file = files.next();
-      if (!file.getName().includes('自己評価')) {
-        Logger.log(`ファイル名に「自己評価」を含まないためスキップ: ${file.getName()}`);
-        continue;
-      }
-
-      Logger.log(`自己評価シートを処理中: ${file.getName()}`);
-      
-      let spreadsheet;
-      try {
-        spreadsheet = SpreadsheetApp.openById(file.getId());
-      } catch (e) {
-        Logger.log(`スプレッドシート「${file.getName()}」のオープンに失敗しました: ${e.message}`);
-        continue;
-      }
-
-      const sheet = spreadsheet.getSheets()[0]; // 最初のシートを対象
-      const data = sheet.getDataRange().getValues();
-
-      if (data.length < 2) {
-        Logger.log(`ヘッダー行のみ、またはデータがないためスキップ: ${file.getName()}`);
-        continue;
-      }
-
-      const headers = data[0];
-      const nameColumnIndex = headers.indexOf(nameColumnHeader);
-
-      if (nameColumnIndex === -1) {
-        Logger.log(`スプレッドシート「${file.getName()}」に氏名列（ヘッダー: ${nameColumnHeader}）が見つかりませんでした。スキップします。`);
-        continue;
-      }
-
-      // ヘッダー行を除いたデータ行を処理
-      for (let i = 1; i < data.length; i++) {
-        const row = data[i];
-        const originalName = row[nameColumnIndex];
-        const anonymousName = originalName ? `提出者_${i}` : '提出者'; // 匿名化
-        
-        let promptData = '';
-        // 氏名列以外のデータをプロンプトに含める
-        headers.forEach((header, index) => {
-          if (index !== nameColumnIndex) {
-            promptData += `${header}: ${row[index] || ''}\n`;
-          }
-        });
-
-        const geminiPrompt = `以下の${anonymousName}さんの自己評価コメントを分析し、強み、改善点、今後の成長領域について簡潔にまとめてください。各項目とそのコメントを考慮してください。
-
-自己評価データ：
-${promptData}`;
-
-        try {
-          const geminiResponse = callGeminiApi(geminiPrompt);
-          const analysisResult = geminiResponse.candidates[0].content.parts[0].text;
-
-          const subject = `【自己評価シート分析結果】${anonymousName}さん向け`;
-          const body = `[info]\n[title]${subject}[/title]\n${analysisResult}\n[/info]`;
-
-          sendChatworkNotification(managerRoomId, body);
-          Logger.log(`${anonymousName}さんの自己評価シート分析結果をChatworkに通知しました。`);
-
-        } catch (error) {
-          Logger.log(`Gemini API呼び出しまたはChatwork通知に失敗しました（${anonymousName}さん）: ${error.message}`);
-        }
-      }
-    }
-    SpreadsheetApp.getUi().alert('自己評価シート分析', '自己評価シートの分析と通知が完了しました。', SpreadsheetApp.getUi().ButtonSet.OK);
-  } catch (e) {
-    Logger.log(`自己評価シート処理中にエラーが発生しました: ${e.message}`);
-    SpreadsheetApp.getUi().alert('エラー', `自己評価シート処理中にエラーが発生しました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
-  }
-}
 
 // --- 1on1ヒアリング項目生成機能 ---
 
