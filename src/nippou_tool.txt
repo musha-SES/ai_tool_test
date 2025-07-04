@@ -751,29 +751,10 @@ function getSelfEvaluationNameColumnHeader() {
   return header || '氏名'; // デフォルトは「氏名」
 }
 
-/**
- * CSVデータをパースして2次元配列として返す。
- * @param {string} csvText CSVファイルのテキスト内容
- * @returns {string[][]} パースされたCSVデータ
- */
-function parseCsvData(csvText) {
-  const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
-  return lines.map(line => {
-    // カンマ区切りで、ダブルクォートで囲まれた部分はカンマを含めて1つの要素とする
-    const regex = /(?:"([^"]*(?:""[^"]*)*)"|([^,]*))(?:,|$)/g;
-    let match;
-    const row = [];
-    while ((match = regex.exec(line)) !== null) {
-      // ダブルクォートで囲まれていれば、ダブルクォートを外し、エスケープされたダブルクォートを解除
-      const value = match[1] !== undefined ? match[1].replace(/""/g, '"') : match[2];
-      row.push(value);
-    }
-    return row;
-  });
-}
+
 
 /**
- * 指定されたGoogleドライブフォルダ内の自己評価シート（CSVファイル）を読み込み、
+ * 指定されたGoogleドライブフォルダ内の自己評価シート（Googleスプレッドシート）を読み込み、
  * その内容を匿名化してGeminiに分析させ、結果をChatworkで通知する。
  */
 function processSelfEvaluationSheets() {
@@ -789,11 +770,11 @@ function processSelfEvaluationSheets() {
 
   try {
     const folder = DriveApp.getFolderById(folderId);
-    const files = folder.getFilesByType(MimeType.CSV);
+    const files = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
 
     if (!files.hasNext()) {
-      Logger.log(`指定されたフォルダ（ID: ${folderId}）にCSVファイルが見つかりませんでした。`);
-      SpreadsheetApp.getUi().alert('自己評価シート分析', `指定されたフォルダにCSVファイルが見つかりませんでした。`, SpreadsheetApp.getUi().ButtonSet.OK);
+      Logger.log(`指定されたフォルダ（ID: ${folderId}）にGoogleスプレッドシートが見つかりませんでした。`);
+      SpreadsheetApp.getUi().alert('自己評価シート分析', `指定されたフォルダにGoogleスプレッドシートが見つかりませんでした。`, SpreadsheetApp.getUi().ButtonSet.OK);
       return;
     }
 
@@ -805,8 +786,17 @@ function processSelfEvaluationSheets() {
       }
 
       Logger.log(`自己評価シートを処理中: ${file.getName()}`);
-      const csvContent = file.getBlob().getDataAsString();
-      const data = parseCsvData(csvContent);
+      
+      let spreadsheet;
+      try {
+        spreadsheet = SpreadsheetApp.openById(file.getId());
+      } catch (e) {
+        Logger.log(`スプレッドシート「${file.getName()}」のオープンに失敗しました: ${e.message}`);
+        continue;
+      }
+
+      const sheet = spreadsheet.getSheets()[0]; // 最初のシートを対象
+      const data = sheet.getDataRange().getValues();
 
       if (data.length < 2) {
         Logger.log(`ヘッダー行のみ、またはデータがないためスキップ: ${file.getName()}`);
@@ -817,7 +807,7 @@ function processSelfEvaluationSheets() {
       const nameColumnIndex = headers.indexOf(nameColumnHeader);
 
       if (nameColumnIndex === -1) {
-        Logger.log(`CSVファイル「${file.getName()}」に氏名列（ヘッダー: ${nameColumnHeader}）が見つかりませんでした。スキップします。`);
+        Logger.log(`スプレッドシート「${file.getName()}」に氏名列（ヘッダー: ${nameColumnHeader}）が見つかりませんでした。スキップします。`);
         continue;
       }
 
