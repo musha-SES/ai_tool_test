@@ -903,10 +903,6 @@ function getDailyReportDataForEmployee(employeeName, limit = 5) {
     const row = values[i];
     if (row[1] === employeeName) { // 氏名列 (B列)
       employeeReports.push({
-        date: row[2], // 日報日付 (C列)
-        workContent: row[3], // 今日の業務内容 (D列)
-        mood: row[4], // 今日の気分 (E列)
-        problems: row[5], // 困っていること (F列)
         aiStatus: row[6], // AI評価状態 (G列)
         aiReason: row[7] // AI評価理由 (H列)
       });
@@ -965,9 +961,14 @@ function getSelfEvaluationDataForEmployee(employeeName) {
           const row = data[i];
           if (row[nameColumnIndex] === employeeName) { // 氏名が一致する行を検索
             const evaluationData = {};
+            const targetHeaders = [
+              '本人から', 'マネージャから', '自己評価', 'マネージャ評価',
+              '来季目標', '目標達成のためにサポートしてほしい事', 'サポート方針', '目標グレード'
+            ];
+
             headers.forEach((header, index) => {
-              if (index !== nameColumnIndex) {
-                evaluationData[header] = row[index];
+              if (targetHeaders.includes(header)) {
+                evaluationData[header] = row[index] || '';
               }
             });
             return evaluationData; // 該当社員の自己評価データを返す
@@ -1011,7 +1012,7 @@ function generate1on1Topics() {
     let promptDailyReports = 'データなし';
     if (dailyReports.length > 0) {
       promptDailyReports = dailyReports.map(report => 
-        `日付: ${report.date}, 気分: ${report.mood}, 困っていること: ${report.problems}, AI評価: ${report.aiStatus}`
+        `状態: ${report.aiStatus}, 理由: ${report.aiReason}`
       ).join('\n');
     }
 
@@ -1024,7 +1025,13 @@ function generate1on1Topics() {
 
     const anonymousName = `提出者_${employeeName.replace(/[^a-zA-Z0-9]/g, '')}`; // 簡易的な匿名化
 
-    const geminiPrompt = `以下の${anonymousName}さんの直近の日報データと、自己評価シートの情報を総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。特に、日報で示されたコンディションの傾向、過去に「危険」や「少し悪い」と判断された点、困っている内容、そして自己評価シートから読み取れる強み、課題、成長領域に焦点を当ててください。質問は具体的で、部下の心情に寄り添うような形式にしてください。提案は箇条書き形式でお願いします.\n\n**直近の日報データ（抜粋）：**\n${promptDailyReports}\n\n**自己評価シートデータ：**\n${promptSelfEvaluation}`;
+    const geminiPrompt = `以下の${anonymousName}さんの日報データと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。
+
+**直近の日報におけるAI評価：**
+${promptDailyReports}
+
+**自己評価シートの主要項目：**
+${promptSelfEvaluation}`;
 
     try {
       // const geminiResponse = callGeminiApi(geminiPrompt);

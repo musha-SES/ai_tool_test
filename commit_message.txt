@@ -1,1 +1,1 @@
-feat: Implement 1on1 hearing topic generation from daily reports and self-evaluations
+refactor: Comment out Gemini API calls in 1on1 topic generation for testing
