@@ -142,26 +142,7 @@ function deleteTriggers() {
   Logger.log('すべてのトリガーを削除しました。');
 }
 
-/**
- * Googleフォームの回答がスプレッドシートに送信されたときにトリガーされる関数。
- * @param {Object} e イベントオブジェクト。フォームの回答データを含む。
- */
-function onFormSubmit(e) {
-  const response = e.namedValues;
-  const reportData = {
-    date: response['日付'] ? response['日付'][0] : 'N/A',
-    name: response['氏名'] ? response['氏名'][0] : 'N/A',
-    workContent: response['今日の業務内容'] ? response['今日の業務内容'][0] : 'N/A',
-    mood: response['今日の気分'] ? response['今日の気分'][0] : 'N/A',
-    problems: response['困っていること'] ? response['困っていること'][0] : '特になし'
-  };
 
-  Logger.log('--- Googleフォームから日報データ受信 ---');
-  Logger.log(JSON.stringify(reportData, null, 2));
-  Logger.log('---------------------------------');
-
-  assessAndNotify(reportData);
-}
 
 // --- Chatwork連携機能 ---
 
