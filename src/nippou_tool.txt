@@ -12,7 +12,7 @@ function onOpen() {
     .addSeparator()
     .addItem('自己評価シート分析', 'processSelfEvaluationSheets')
     .addSeparator()
-    .addItem('1on1ヒアリング項目生成', 'promptForEmployeeNameAndGenerateTopics')
+    .addItem('1on1ヒアリング項目生成', 'generate1on1Topics')
     .addToUi();
 }
 
@@ -903,8 +903,9 @@ function getDailyReportDataForEmployee(employeeName, limit = 5) {
     const row = values[i];
     if (row[1] === employeeName) { // 氏名列 (B列)
       employeeReports.push({
-        aiStatus: row[6], // AI評価状態 (G列)
-        aiReason: row[7] // AI評価理由 (H列)
+        workContent: row[3], // 今日の業務内容 (D列)
+        problems: row[5],    // 困っていること (F列)
+        aiReason: row[7]     // AI評価理由 (H列)
       });
       if (employeeReports.length >= limit) {
         break;
@@ -984,98 +985,102 @@ function getSelfEvaluationDataForEmployee(employeeName) {
 }
 
 /**
- * 日報ログと自己評価シートを総合的に分析し、1on1ヒアリング項目を生成する。
- * 全社員を対象に実行される。
+ * プロンプトに含めるテキストの最大長。
  */
-/**
- * ユーザーに社員名を入力させ、その社員の1on1ヒアリング項目を生成する。
- */
-function promptForEmployeeNameAndGenerateTopics() {
-  const ui = SpreadsheetApp.getUi();
-  const response = ui.prompt(
-    '1on1ヒアリング項目生成',
-    'ヒアリング項目を生成する社員の名前を入力してください。',
-    ui.ButtonSet.OK_CANCEL
-  );
+const MAX_PROMPT_TEXT_LENGTH = 150;
 
-  if (response.getSelectedButton() === ui.Button.OK) {
-    const employeeName = response.getResponseText();
-    if (employeeName) {
-      generate1on1Topics(employeeName);
-    } else {
-      ui.alert('エラー', '社員名が入力されていません。処理を中止します。', ui.ButtonSet.OK);
-    }
-  } else {
-    ui.alert('情報', '処理がキャンセルされました。', ui.ButtonSet.OK);
+/**
+ * テキストを指定された最大長に切り詰め、末尾に「...」を追加する。
+ * @param {string} text 元のテキスト。
+ * @param {number} maxLength 最大文字数。
+ * @returns {string} 切り詰められたテキスト。
+ */
+function truncateText(text, maxLength) {
+  if (typeof text !== 'string' || text === null) {
+    return '';
   }
+  if (text.length > maxLength) {
+    return text.substring(0, maxLength) + '...';
+  }
+  return text;
 }
 
 /**
  * 日報ログと自己評価シートを総合的に分析し、1on1ヒアリング項目を生成する。
- * @param {string} [targetEmployeeName=null] 特定の社員名を指定する場合。指定しない場合は全社員を対象。
+ * 対象の社員はスクリプトプロパティから読み込む。
  */
-function generate1on1Topics(targetEmployeeName = null) {
-  const employeeNames = targetEmployeeName ? [targetEmployeeName] : getAllEmployeeNames();
+function generate1on1Topics() {
+  const ui = SpreadsheetApp.getUi();
+  const properties = PropertiesService.getScriptProperties();
+  const targetEmployeeName = properties.getProperty('TARGET_EMPLOYEE_NAME_FOR_1ON1');
+
+  if (!targetEmployeeName || targetEmployeeName.trim() === '') {
+    const errorMessage = 'スクリプトプロパティ「TARGET_EMPLOYEE_NAME_FOR_1ON1」が設定されていません。処理をスキップします。';
+    Logger.log(errorMessage);
+    ui.alert('設定エラー', errorMessage + '「プロジェクトの設定」 > 「スクリプトプロパティ」を確認してください。', ui.ButtonSet.OK);
+    return;
+  }
+
   const roomIds = getChatworkTargetRoomIds();
   const managerRoomId = roomIds.manager;
 
   if (!managerRoomId) {
     Logger.log("マネージャーのChatworkルームIDが設定されていません。1on1ヒアリング項目通知をスキップします。");
-    SpreadsheetApp.getUi().alert('エラー', 'マネージャーのChatworkルームIDが設定されていません。スクリプトプロパティを確認してください。', SpreadsheetApp.getUi().ButtonSet.OK);
+    ui.alert('エラー', 'マネージャーのChatworkルームIDが設定されていません。スクリプトプロパティを確認してください。', SpreadsheetApp.getUi().ButtonSet.OK);
     return;
   }
 
-  if (employeeNames.length === 0) {
-    Logger.log("「日報ログ」シートに社員データが見つかりませんでした。1on1ヒアリング項目生成をスキップします。");
-    SpreadsheetApp.getUi().alert('情報', '「日報ログ」シートに社員データが見つかりませんでした。ヒアリング項目は生成されません。', SpreadsheetApp.getUi().ButtonSet.OK);
-    return;
+  Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目を生成中...`);
+  const dailyReports = getDailyReportDataForEmployee(targetEmployeeName, 5); // 直近5件の日報
+  const selfEvaluation = getSelfEvaluationDataForEmployee(targetEmployeeName);
+
+  if (dailyReports.length === 0 && !selfEvaluation) {
+      const infoMessage = `「${targetEmployeeName}」さんの日報ログまたは自己評価シートのデータが見つかりませんでした。`;
+      Logger.log(infoMessage);
+      ui.alert('情報', infoMessage + 'ヒアリング項目は生成されません。', ui.ButtonSet.OK);
+      return;
   }
 
-  for (const employeeName of employeeNames) {
-    Logger.log(`${employeeName}さんの1on1ヒアリング項目を生成中...`);
-    const dailyReports = getDailyReportDataForEmployee(employeeName, 5); // 直近5件の日報
-    const selfEvaluation = getSelfEvaluationDataForEmployee(employeeName);
+  let promptDailyReports = 'データなし';
+  if (dailyReports.length > 0) {
+    promptDailyReports = dailyReports.map(report => 
+      `業務内容: ${truncateText(report.workContent, MAX_PROMPT_TEXT_LENGTH)}, 困っていること: ${truncateText(report.problems, MAX_PROMPT_TEXT_LENGTH)}, AI評価理由: ${truncateText(report.aiReason, MAX_PROMPT_TEXT_LENGTH)}`
+    ).join('\n');
+  }
 
-    let promptDailyReports = 'データなし';
-    if (dailyReports.length > 0) {
-      promptDailyReports = dailyReports.map(report => 
-        `業務内容: ${truncateText(report.workContent, MAX_PROMPT_TEXT_LENGTH)}, 気分: ${report.mood}, 困っていること: ${truncateText(report.problems, MAX_PROMPT_TEXT_LENGTH)}, AI状態: ${report.aiStatus}, AI理由: ${truncateText(report.aiReason, MAX_PROMPT_TEXT_LENGTH)}`
-      ).join('\n');
-    }
+  let promptSelfEvaluation = 'データなし';
+  if (selfEvaluation) {
+    promptSelfEvaluation = Object.entries(selfEvaluation).map(([key, value]) => 
+      `${key}: ${truncateText(value, MAX_PROMPT_TEXT_LENGTH)}`
+    ).join('\n');
+  }
 
-    let promptSelfEvaluation = 'データなし';
-    if (selfEvaluation) {
-      promptSelfEvaluation = Object.entries(selfEvaluation).map(([key, value]) => 
-        `${key}: ${truncateText(value, MAX_PROMPT_TEXT_LENGTH)}`
-      ).join('\n');
-    }
+  const anonymousName = `対象者`; // 固有名詞を削除
 
-    const anonymousName = `提出者_${employeeName.replace(/[^a-zA-Z0-9]/g, '')}`; // 簡易的な匿名化
+  const geminiPrompt = `以下の対象者の日報データと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが対象者にヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。
 
-    const geminiPrompt = `以下の${anonymousName}さんの日報データと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。
-
-**直近の日報におけるAI評価：**
+**直近の日報データ：**
 ${promptDailyReports}
 
 **自己評価シートの主要項目：**
 ${promptSelfEvaluation}`;
 
-    try {
-      const geminiResponse = callGeminiApi(geminiPrompt);
-      const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
+  try {
+    const geminiResponse = callGeminiApi(geminiPrompt);
+    const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
 
-      const subject = `【1on1ヒアリング項目提案】${employeeName}さん向け`;
-      const body = `[info]\n[title]${subject}[/title]\n${hearingTopics}\n[/info]`;
+    const subject = `【1on1ヒアリング項目提案】${targetEmployeeName}さん向け`;
+    const body = `[info]\n[title]${subject}[/title]\n${hearingTopics}\n[/info]`;
 
-      sendChatworkNotification(managerRoomId, body);
-      Logger.log(`${employeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
+    sendChatworkNotification(managerRoomId, body);
+    Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
+    ui.alert('完了', `${targetEmployeeName}さんの1on1ヒアリング項目生成と通知が完了しました。`, SpreadsheetApp.getUi().ButtonSet.OK);
 
-    } catch (error) {
-      Logger.log(`Gemini API呼び出しまたはChatwork通知に失敗しました（${employeeName}さん）: ${error.message}`);
-      SpreadsheetApp.getUi().alert('エラー', `${employeeName}さんの1on1ヒアリング項目生成中にエラーが発生しました: ${error.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
-    }
+  } catch (error) {
+    const errorMessage = `${targetEmployeeName}さんの1on1ヒアリング項目生成中にエラーが発生しました: ${error.message}`;
+    Logger.log(`Gemini API呼び出しまたはChatwork通知に失敗しました（${targetEmployeeName}さん）: ${error.message}`);
+    ui.alert('エラー', errorMessage, SpreadsheetApp.getUi().ButtonSet.OK);
   }
-  SpreadsheetApp.getUi().alert('完了', '全社員の1on1ヒアリング項目生成と通知が完了しました。', SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 
