@@ -11,6 +11,8 @@ function onOpen() {
     .addItem('全てのトリガーを削除', 'deleteTriggers')
     .addSeparator()
     .addItem('自己評価シート分析', 'processSelfEvaluationSheets')
+    .addSeparator()
+    .addItem('1on1ヒアリング項目生成', 'generate1on1Topics')
     .addToUi();
 }
 
@@ -850,6 +852,196 @@ ${promptData}`;
     Logger.log(`自己評価シート処理中にエラーが発生しました: ${e.message}`);
     SpreadsheetApp.getUi().alert('エラー', `自己評価シート処理中にエラーが発生しました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
   }
+}
+
+// --- 1on1ヒアリング項目生成機能 ---
+
+/**
+ * 「日報ログ」シートから全社員の名前を取得する。
+ * @returns {string[]} 社員名のユニークなリスト
+ */
+function getAllEmployeeNames() {
+  const logSheetName = '日報ログ';
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(logSheetName);
+  if (!sheet) {
+    Logger.log(`シート「${logSheetName}」が見つかりません。`);
+    return [];
+  }
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+  if (values.length <= 1) { // ヘッダー行のみの場合
+    return [];
+  }
+  const names = new Set();
+  for (let i = 1; i < values.length; i++) {
+    names.add(values[i][1]); // 氏名列 (B列)
+  }
+  return Array.from(names);
+}
+
+/**
+ * 指定された社員の過去の日報データを取得する。
+ * @param {string} employeeName 社員名
+ * @param {number} limit 取得する日報の件数（直近から）
+ * @returns {Object[]} 日報データの配列
+ */
+function getDailyReportDataForEmployee(employeeName, limit = 5) {
+  const logSheetName = '日報ログ';
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(logSheetName);
+  if (!sheet) {
+    Logger.log(`シート「${logSheetName}」が見つかりません。`);
+    return [];
+  }
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+  if (values.length <= 1) {
+    return [];
+  }
+
+  const employeeReports = [];
+  for (let i = values.length - 1; i >= 1; i--) { // 最新の日報から遡る
+    const row = values[i];
+    if (row[1] === employeeName) { // 氏名列 (B列)
+      employeeReports.push({
+        date: row[2], // 日報日付 (C列)
+        workContent: row[3], // 今日の業務内容 (D列)
+        mood: row[4], // 今日の気分 (E列)
+        problems: row[5], // 困っていること (F列)
+        aiStatus: row[6], // AI評価状態 (G列)
+        aiReason: row[7] // AI評価理由 (H列)
+      });
+      if (employeeReports.length >= limit) {
+        break;
+      }
+    }
+  }
+  return employeeReports.reverse(); // 古い順に戻す
+}
+
+/**
+ * 指定された社員の自己評価シートデータを取得する。
+ * @param {string} employeeName 社員名
+ * @returns {Object|null} 自己評価シートデータ（オブジェクト形式）
+ */
+function getSelfEvaluationDataForEmployee(employeeName) {
+  const folderId = getSelfEvaluationFolderId();
+  const nameColumnHeader = getSelfEvaluationNameColumnHeader();
+
+  try {
+    const folder = DriveApp.getFolderById(folderId);
+    const files = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
+
+    while (files.hasNext()) {
+      const file = files.next();
+      // ファイル名に「自己評価」を含み、かつ社員名が含まれるファイルを検索
+      if (file.getName().includes('自己評価') && file.getName().includes(employeeName)) {
+        Logger.log(`自己評価シートを読み込み中: ${file.getName()}`);
+        let spreadsheet;
+        try {
+          spreadsheet = SpreadsheetApp.openById(file.getId());
+        } catch (e) {
+          Logger.log(`スプレッドシート「${file.getName()}」のオープンに失敗しました: ${e.message}`);
+          continue;
+        }
+
+        const sheet = spreadsheet.getSheets()[0]; // 最初のシートを対象
+        const data = sheet.getDataRange().getValues();
+
+        if (data.length < 2) {
+          Logger.log(`ヘッダー行のみ、またはデータがないためスキップ: ${file.getName()}`);
+          continue;
+        }
+
+        const headers = data[0];
+        const nameColumnIndex = headers.indexOf(nameColumnHeader);
+
+        if (nameColumnIndex === -1) {
+          Logger.log(`スプレッドシート「${file.getName()}」に氏名列（ヘッダー: ${nameColumnHeader}）が見つかりませんでした。スキップします。`);
+          continue;
+        }
+
+        // ヘッダー行を除いたデータ行を処理
+        for (let i = 1; i < data.length; i++) {
+          const row = data[i];
+          if (row[nameColumnIndex] === employeeName) { // 氏名が一致する行を検索
+            const evaluationData = {};
+            headers.forEach((header, index) => {
+              if (index !== nameColumnIndex) {
+                evaluationData[header] = row[index];
+              }
+            });
+            return evaluationData; // 該当社員の自己評価データを返す
+          }
+        }
+      }
+    }
+  }
+  catch (e) {
+    Logger.log(`自己評価シートの取得中にエラーが発生しました: ${e.message}`);
+  }
+  return null;
+}
+
+/**
+ * 日報ログと自己評価シートを総合的に分析し、1on1ヒアリング項目を生成する。
+ * 全社員を対象に実行される。
+ */
+function generate1on1Topics() {
+  const employeeNames = getAllEmployeeNames();
+  const roomIds = getChatworkTargetRoomIds();
+  const managerRoomId = roomIds.manager;
+
+  if (!managerRoomId) {
+    Logger.log("マネージャーのChatworkルームIDが設定されていません。1on1ヒアリング項目通知をスキップします。");
+    SpreadsheetApp.getUi().alert('エラー', 'マネージャーのChatworkルームIDが設定されていません。スクリプトプロパティを確認してください。', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  if (employeeNames.length === 0) {
+    Logger.log("「日報ログ」シートに社員データが見つかりませんでした。1on1ヒアリング項目生成をスキップします。");
+    SpreadsheetApp.getUi().alert('情報', '「日報ログ」シートに社員データが見つかりませんでした。ヒアリング項目は生成されません。', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  for (const employeeName of employeeNames) {
+    Logger.log(`${employeeName}さんの1on1ヒアリング項目を生成中...`);
+    const dailyReports = getDailyReportDataForEmployee(employeeName, 5); // 直近5件の日報
+    const selfEvaluation = getSelfEvaluationDataForEmployee(employeeName);
+
+    let promptDailyReports = 'データなし';
+    if (dailyReports.length > 0) {
+      promptDailyReports = dailyReports.map(report => 
+        `日付: ${report.date}, 気分: ${report.mood}, 困っていること: ${report.problems}, AI評価: ${report.aiStatus}`
+      ).join('\n');
+    }
+
+    let promptSelfEvaluation = 'データなし';
+    if (selfEvaluation) {
+      promptSelfEvaluation = Object.entries(selfEvaluation).map(([key, value]) => 
+        `${key}: ${value}`
+      ).join('\n');
+    }
+
+    const anonymousName = `提出者_${employeeName.replace(/[^a-zA-Z0-9]/g, '')}`; // 簡易的な匿名化
+
+    const geminiPrompt = `以下の${anonymousName}さんの直近の日報データと、自己評価シートの情報を総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。特に、日報で示されたコンディションの傾向、過去に「危険」や「少し悪い」と判断された点、困っている内容、そして自己評価シートから読み取れる強み、課題、成長領域に焦点を当ててください。質問は具体的で、部下の心情に寄り添うような形式にしてください。提案は箇条書き形式でお願いします.\n\n**直近の日報データ（抜粋）：**\n${promptDailyReports}\n\n**自己評価シートデータ：**\n${promptSelfEvaluation}`;
+
+    try {
+      const geminiResponse = callGeminiApi(geminiPrompt);
+      const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
+
+      const subject = `【1on1ヒアリング項目提案】${employeeName}さん向け`;
+      const body = `[info]\n[title]${subject}[/title]\n${hearingTopics}\n[/info]`;
+
+      sendChatworkNotification(managerRoomId, body);
+      Logger.log(`${employeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
+
+    } catch (error) {
+      Logger.log(`Gemini API呼び出しまたはChatwork通知に失敗しました（${employeeName}さん）: ${error.message}`);
+      SpreadsheetApp.getUi().alert('エラー', `${employeeName}さんの1on1ヒアリング項目生成中にエラーが発生しました: ${error.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+    }
+  }
+  SpreadsheetApp.getUi().alert('完了', '全社員の1on1ヒアリング項目生成と通知が完了しました。', SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 

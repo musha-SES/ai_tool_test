@@ -1,1 +1,1 @@
-feat: Add self-evaluation sheet analysis feature and update documentation
+feat: Change self-evaluation sheet processing from CSV to Google Sheets
