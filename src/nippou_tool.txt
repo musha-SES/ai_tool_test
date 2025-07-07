@@ -217,14 +217,7 @@ function sendDailyReportQuestions() {
       return;
     }
 
-    const message = `[To:${employeeRoomId}] ${employeeName}さん
-おはようございます！
-本日の日報を以下のフォーマットでご返信ください。
-
-#日報
-業務内容：
-気分：(良い/普通/少し悪い/悪い)
-困っていること：`;
+    const message = `[To:${employeeRoomId}] ${employeeName}さん\nおはようございます！\n本日の日報を以下のフォーマットでご返信ください。\n\n#日報\n業務内容：\n気分：(良い/普通/少し悪い/悪い)\n困っていること：`;
     try {
       const response = sendChatworkNotification(employeeRoomId, message);
       const messageId = response.message_id.toString();
@@ -592,11 +585,153 @@ function getDailyReportDataForEmployee(employeeName, limit = 5) {
   return employeeReports;
 }
 
-const MAX_PROMPT_TEXT_LENGTH = 150;
+/**
+ * Googleドライブから指定された社員の自己評価シートを読み込み、データを抽出する。
+ * @param {string} employeeName 対象社員名
+ * @param {string} folderId 自己評価シートが保存されているGoogleドライブのフォルダID
+ * @param {string} sheetName 自己評価シート内の読み込むシート名
+ * @returns {Object|null} 抽出された自己評価データ、またはnull
+ */
+function getSelfEvaluationDataForEmployee(employeeName, folderId, sheetName) {
+  try {
+    const folder = DriveApp.getFolderById(folderId);
+    const files = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
+    let selfEvalFile = null;
 
-function truncateText(text, maxLength) {
-  if (typeof text !== 'string' || !text) return '';
-  return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+    const normalizedEmployeeName = employeeName.trim().toLowerCase();
+
+    while (files.hasNext()) {
+      const file = files.next();
+      // ファイル名に社員名と「自己評価」が正確に含まれるかチェック
+      if (file.getName().toLowerCase().includes(normalizedEmployeeName) && file.getName().includes("自己評価")) {
+        selfEvalFile = file;
+        break;
+      }
+    }
+
+    if (!selfEvalFile) {
+      Logger.log(`自己評価シートが見つかりませんでした: ${employeeName}さんの「自己評価」を含むGoogleスプレッドシートファイルがフォルダID ${folderId} 内に見つかりません。`);
+      return null;
+    }
+
+    const spreadsheet = SpreadsheetApp.openById(selfEvalFile.getId());
+    const sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+      Logger.log(`エラー: スプレッドシートID「${selfEvalFile.getId()}」内にシート「${sheetName}」が見つかりません。`);
+      return null;
+    }
+
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) { // ヘッダー行 + 少なくとも1つのデータ行
+      Logger.log(`シート「${sheetName}」にデータがありません。`);
+      return null;
+    }
+
+    const header = values[0];
+    const dataRows = values.slice(1);
+
+    const headerMap = {};
+    header.forEach((col, index) => {
+      if (typeof col === 'string') {
+        headerMap[col.trim()] = index;
+      }
+    });
+
+    const extractedData = {
+      employeeName: '',
+      evaluationPeriod: '', // 評価期間
+      questions: [],
+      '来季目標': '',
+      '目標達成のためにサポートしてほしい事': '',
+      'サポート方針': '',
+      '目標グレード': ''
+    };
+
+    // 「氏名」列のインデックスを取得
+    const employeeNameHeaderIndex = headerMap['氏名'];
+    if (employeeNameHeaderIndex === undefined) {
+      Logger.log(`エラー: 自己評価シートに「氏名」列が見つかりません。`);
+      return null;
+    }
+
+    // 対象社員の行をフィルタリング
+    const employeeRow = dataRows.find(row => {
+      const employeeNameInSheet = row[employeeNameHeaderIndex];
+      return employeeNameInSheet && employeeNameInSheet.toString().trim().toLowerCase() === normalizedEmployeeName;
+    });
+
+    if (!employeeRow) {
+      Logger.log(`シート「${sheetName}」に社員「${employeeName}」のデータが見つかりません。`);
+      return null;
+    }
+
+    extractedData.employeeName = employeeRow[employeeNameHeaderIndex] ? employeeRow[employeeNameHeaderIndex].toString().trim() : 'N/A';
+
+    // 評価期間の抽出 (任意)
+    const evaluationPeriodIndex = headerMap['評価期間'];
+    if (evaluationPeriodIndex !== undefined) {
+      extractedData.evaluationPeriod = employeeRow[evaluationPeriodIndex] ? employeeRow[evaluationPeriodIndex].toString().trim() : '';
+    }
+
+    // 単独項目を抽出
+    const SINGLE_ITEM_HEADERS = ['来季目標', '目標達成のためにサポートしてほしい事', 'サポート方針', '目標グレード'];
+    SINGLE_ITEM_HEADERS.forEach(itemHeader => {
+      const colIndex = headerMap[itemHeader];
+      if (colIndex !== undefined) {
+        const value = employeeRow[colIndex];
+        extractedData[itemHeader] = value ? value.toString().trim() : '';
+      } else {
+        extractedData[itemHeader] = '';
+      }
+    });
+
+    // 設問ごとの評価項目を動的に抽出
+    const questionSuffixes = ['_設問内容', '_本人コメント', '_マネージャコメント', '_自己評価', '_マネージャ評価'];
+    const questionNames = new Set();
+
+    header.forEach(h => {
+      if (typeof h === 'string') {
+        for (const suffix of questionSuffixes) {
+          if (h.endsWith(suffix)) {
+            questionNames.add(h.replace(suffix, '').trim());
+            break;
+          }
+        }
+      }
+    });
+
+    questionNames.forEach(qName => {
+      const questionData = {
+        questionName: qName,
+        questionContent: '',
+        selfComment: '',
+        managerComment: '',
+        selfEvaluation: '',
+        managerEvaluation: ''
+      };
+
+      questionSuffixes.forEach(suffix => {
+        const fullHeader = `${qName}${suffix}`;
+        const colIndex = headerMap[fullHeader];
+        if (colIndex !== undefined) {
+          const value = employeeRow[colIndex];
+          if (suffix === '_設問内容') questionData.questionContent = value ? value.toString().trim() : '';
+          if (suffix === '_本人コメント') questionData.selfComment = value ? value.toString().trim() : '';
+          if (suffix === '_マネージャコメント') questionData.managerComment = value ? value.toString().trim() : '';
+          if (suffix === '_自己評価') questionData.selfEvaluation = value ? value.toString().trim() : '';
+          if (suffix === '_マネージャ評価') questionData.managerEvaluation = value ? value.toString().trim() : '';
+        }
+      });
+      extractedData.questions.push(questionData);
+    });
+
+    Logger.log(`自己評価シート「${selfEvalFile.getName()}」からデータを抽出しました。`);
+    return extractedData;
+
+  } catch (e) {
+    Logger.log(`自己評価シートの読み込みまたは解析中にエラーが発生しました: ${e.message}`);
+    return null;
+  }
 }
 
 /**
@@ -604,12 +739,29 @@ function truncateText(text, maxLength) {
  */
 function generate1on1Topics() {
   const ui = SpreadsheetApp.getUi();
-  const targetEmployeeName = PropertiesService.getScriptProperties().getProperty('TARGET_EMPLOYEE_NAME_FOR_1ON1');
+  const properties = PropertiesService.getScriptProperties();
+  const targetEmployeeName = properties.getProperty('TARGET_EMPLOYEE_NAME_FOR_1ON1');
+  const selfEvaluationFolderId = properties.getProperty('SELF_EVALUATION_FOLDER_ID');
+  const selfEvaluationInputSheetName = properties.getProperty('SELF_EVALUATION_INPUT_SHEET_NAME');
 
   if (!targetEmployeeName) {
-    const errorMessage = 'スクリプトプロパティ「TARGET_EMPLOYEE_NAME_FOR_1ON1」が設定されていません。';
+    const errorMessage = 'スクリプトプロパティ「TARGET_EMPLOYEE_NAME_FOR_1ON1」が設定されていません。処理をスキップします。';
     Logger.log(errorMessage);
-    ui.alert('設定エラー', errorMessage, ui.ButtonSet.OK);
+    ui.alert('設定エラー', errorMessage + '「プロジェクトの設定」 > 「スクリプトプロパティ」を確認してください。', ui.ButtonSet.OK);
+    return;
+  }
+
+  if (!selfEvaluationFolderId) {
+    const errorMessage = 'スクリプトプロパティ「SELF_EVALUATION_FOLDER_ID」が設定されていません。処理をスキップします。自己評価シートの読み込みにはこの設定が必要です。';
+    Logger.log(errorMessage);
+    ui.alert('設定エラー', errorMessage + '「プロジェクトの設定」 > 「スクリプトプロパティ」を確認してください。', ui.ButtonSet.OK);
+    return;
+  }
+
+  if (!selfEvaluationInputSheetName) {
+    const errorMessage = 'スクリプトプロパティ「SELF_EVALUATION_INPUT_SHEET_NAME」が設定されていません。処理をスキップします。自己評価シートの読み込みにはこの設定が必要です。';
+    Logger.log(errorMessage);
+    ui.alert('設定エラー', errorMessage + '「プロジェクトの設定」 > 「スクリプトプロパティ」を確認してください。', ui.ButtonSet.OK);
     return;
   }
 
@@ -631,20 +783,48 @@ function generate1on1Topics() {
       return;
   }
 
-  const dailyReports = getDailyReportDataForEmployee(targetEmployeeName, 5);
-  if (dailyReports.length === 0) {
-    const infoMessage = `「${targetEmployeeName}」さんの日報ログデータが見つかりませんでした。`;
+  Logger.log(`TARGET_EMPLOYEE_NAME_FOR_1ON1で指定された${targetEmployeeName}さんの1on1ヒアリング項目生成を開始します。`);
+
+  // 自己評価シートのデータを取得
+  const selfEvalData = getSelfEvaluationDataForEmployee(targetEmployeeName, selfEvaluationFolderId, selfEvaluationInputSheetName);
+
+  if (!selfEvalData || Object.keys(selfEvalData).length === 0) {
+    const infoMessage = `「${targetEmployeeName}」さんの自己評価シートから有効なデータが抽出できませんでした。シート名「${selfEvaluationInputSheetName}」またはシートのフォーマットを確認してください。`;
     Logger.log(infoMessage);
     ui.alert('情報', infoMessage, ui.ButtonSet.OK);
     return;
   }
 
-  const promptDailyReports = dailyReports.map(r => `業務内容: ${truncateText(r.workContent, MAX_PROMPT_TEXT_LENGTH)}, 困っていること: ${truncateText(r.problems, MAX_PROMPT_TEXT_LENGTH)}, AI評価理由: ${truncateText(r.aiReason, MAX_PROMPT_TEXT_LENGTH)}`).join('\n');
-  const geminiPrompt = `以下の対象者さんの直近の日報データを総合的に分析し、次回の1on1面談でマネージャーがヒアリングすべき具体的な質問やテーマを5つ提案してください。特に、コンディションの傾向、過去の懸念点、困っている内容に焦点を当て、部下の心情に寄り添う具体的な質問を箇条書きでお願いします。\n\n**直近の日報データ：**\n${promptDailyReports}`;
+  // Geminiプロンプトの構築
+  let promptSelfEvalData = '';
+
+  if (selfEvalData.evaluationPeriod) {
+    promptSelfEvalData += `評価期間: ${selfEvalData.evaluationPeriod}\n`;
+  }
+
+  selfEvalData.questions.forEach(q => {
+    promptSelfEvalData += `\n設問: ${q.questionContent}\n`;
+    if (q.selfComment) promptSelfEvalData += `  本人コメント: ${q.selfComment}\n`;
+    if (q.selfEvaluation) promptSelfEvalData += `  自己評価: ${q.selfEvaluation}\n`;
+    if (q.managerComment) promptSelfEvalData += `  マネージャコメント: ${q.managerComment}\n`;
+    if (q.managerEvaluation) promptSelfEvalData += `  マネージャ評価: ${q.managerEvaluation}\n`;
+  });
+
+  if (selfEvalData['来季目標']) promptSelfEvalData += `\n来季目標: ${selfEvalData['来季目標']}\n`;
+  if (selfEvalData['目標達成のためにサポートしてほしい事']) promptSelfEvalData += `目標達成のためにサポートしてほしい事: ${selfEvalData['目標達成のためにサポートしてほしい事']}\n`;
+  if (selfEvalData['サポート方針']) promptSelfEvalData += `サポート方針: ${selfEvalData['サポート方針']}\n`;
+  if (selfEvalData['目標グレード']) promptSelfEvalData += `目標グレード: ${selfEvalData['目標グレード']}\n`;
+
+  const anonymousName = `対象者`;
+
+  const geminiPrompt = `以下の${anonymousName}さんの自己評価シートのデータを総合的に分析し、強み、改善点、今後の成長領域、そして次回の1on1面談でマネージャーがヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。\n\n**自己評価シートデータ：**\n${promptSelfEvalData}`;
+
+  Logger.log('Geminiに送信される最終プロンプト:\n' + geminiPrompt);
 
   try {
     const geminiResponse = callGeminiApi(geminiPrompt);
     const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
+
     const subject = `【1on1ヒアリング項目提案】${targetEmployeeName}さん向け`;
     const body = `[info][title]${subject}[/title]\n${hearingTopics}[/info]`;
 
