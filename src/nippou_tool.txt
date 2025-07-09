@@ -580,6 +580,7 @@ function getDailyReportDataForEmployee(employeeName) {
   if (values.length <= 1) {
     return '過去の日報ログはありません。';
   }
+  Logger.log(`「日報ログ」シートから全 ${values.length - 1} 件のデータを読み込みました。`);
 
   const header = values[0];
   const dataRows = values.slice(1);
@@ -607,6 +608,8 @@ function getDailyReportDataForEmployee(employeeName) {
     const reportDate = row[dateCol] ? new Date(row[dateCol]) : null;
     return reportName.toLowerCase() === employeeName.toLowerCase() && reportDate && reportDate >= oneYearAgo;
   });
+  
+  Logger.log(`${employeeName}さんの日報を ${employeeReports.length} 件抽出しました。`);
 
   if (employeeReports.length === 0) {
     return '過去1年間の日報ログはありません。';
@@ -649,31 +652,43 @@ function getDailyReportDataForEmployee(employeeName) {
   let summary = `過去1年間の日報サマリー (${employeeReports.length}件のデータ):
 `;
 
-  summary += `\n気分傾向:
+  summary += `
+気分傾向:
 `;
   for (const mood in moodCounts) {
     if (moodCounts[mood] > 0) {
-      summary += `  - ${mood}: ${moodCounts[mood]}回\n`;
+      summary += `  - ${mood}: ${moodCounts[mood]}回
+`;
     }
   }
 
   if (negativeAIEvals.length > 0) {
-    summary += `\nAI評価「危険」または「少し悪い」の履歴:\n`;
-    summary += negativeAIEvals.join('\n') + '\n';
+    summary += `
+AI評価「危険」または「少し悪い」の履歴:
+`;
+    summary += negativeAIEvals.join('
+') + '
+';
   }
 
   const frequentProblems = Object.entries(problemKeywords).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
   if (frequentProblems.length > 0) {
-    summary += `\n繰り返し現れる課題キーワード:\n`;
+    summary += `
+繰り返し現れる課題キーワード:
+`;
     frequentProblems.forEach(([keyword, count]) => {
-      summary += `  - ${keyword}: ${count}回\n`;
+      summary += `  - ${keyword}: ${count}回
+`;
     });
   }
 
   if (positiveWorkContents.length > 0) {
-    summary += `\nポジティブな業務内容の抜粋 (直近5件):\n`;
+    summary += `
+ポジティブな業務内容の抜粋 (直近5件):
+`;
     positiveWorkContents.slice(-5).forEach(content => {
-      summary += `  ${content}\n`;
+      summary += `  ${content}
+`;
     });
   }
 
@@ -722,6 +737,7 @@ function getSelfEvaluationDataForEmployee(employeeName, folderId, sheetName) {
       Logger.log(`シート「${sheetName}」にデータがありません。`);
       return null;
     }
+    Logger.log(`自己評価シート「${sheet.getParent().getName()}」の「${sheetName}」から ${values.length - 1} 件のデータを読み込みました。`);
 
     const header = values[0];
     const dataRows = values.slice(1);
@@ -757,9 +773,10 @@ function getSelfEvaluationDataForEmployee(employeeName, folderId, sheetName) {
     });
 
     if (!employeeRow) {
-      Logger.log(`シート「${sheetName}」に社員「${employeeName}」のデータが見つかりません。`);
+      Logger.log(`シート「${sheetName}」に社員「${employeeName}」のデータが見つかりませんでした。`);
       return null;
     }
+    Logger.log(`社員「${employeeName}」さんのデータを1件見つけました。`);
 
     extractedData.employeeName = employeeRow[employeeNameHeaderIndex] ? employeeRow[employeeNameHeaderIndex].toString().trim() : 'N/A';
 
@@ -831,6 +848,20 @@ function getSelfEvaluationDataForEmployee(employeeName, folderId, sheetName) {
 }
 
 /**
+ * テキストを指定した最大長に短縮し、中央を省略する。
+ * @param {string} text 対象のテキスト
+ * @param {number} maxLength 最大長
+ * @returns {string} 短縮されたテキスト
+ */
+function truncateText(text, maxLength) {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  const half = Math.floor((maxLength - 5) / 2); // 5は " ... " の分
+  return text.substring(0, half) + ' ... ' + text.substring(text.length - half);
+}
+
+/**
  * 1on1ヒアリング項目を生成する。
  */
 function generate1on1Topics() {
@@ -898,34 +929,55 @@ function generate1on1Topics() {
   let promptSelfEvalData = '';
 
   if (selfEvalData.evaluationPeriod) {
-    promptSelfEvalData += `評価期間: ${selfEvalData.evaluationPeriod}\n`;
+    promptSelfEvalData += `評価期間: ${selfEvalData.evaluationPeriod}
+`;
   }
 
   selfEvalData.questions.forEach(q => {
-    promptSelfEvalData += `\n設問: ${q.questionContent}\n`;
-    if (q.selfComment) promptSelfEvalData += `  本人コメント: ${q.selfComment}\n`;
-    if (q.selfEvaluation) promptSelfEvalData += `  自己評価: ${q.selfEvaluation}\n`;
-    if (q.managerComment) promptSelfEvalData += `  マネージャコメント: ${q.managerComment}\n`;
-    if (q.managerEvaluation) promptSelfEvalData += `  マネージャ評価: ${q.managerEvaluation}\n`;
+    promptSelfEvalData += `
+設問: ${q.questionContent}
+`;
+    if (q.selfComment) promptSelfEvalData += `  本人コメント: ${q.selfComment}
+`;
+    if (q.selfEvaluation) promptSelfEvalData += `  自己評価: ${q.selfEvaluation}
+`;
+    if (q.managerComment) promptSelfEvalData += `  マネージャコメント: ${q.managerComment}
+`;
+    if (q.managerEvaluation) promptSelfEvalData += `  マネージャ評価: ${q.managerEvaluation}
+`;
   });
 
-  if (selfEvalData['来季目標']) promptSelfEvalData += `\n来季目標: ${selfEvalData['来季目標']}\n`;
-  if (selfEvalData['目標達成のためにサポートしてほしい事']) promptSelfEvalData += `目標達成のためにサポートしてほしい事: ${selfEvalData['目標達成のためにサポートしてほしい事']}\n`;
-  if (selfEvalData['サポート方針']) promptSelfEvalData += `サポート方針: ${selfEvalData['サポート方針']}\n`;
-  if (selfEvalData['目標グレード']) promptSelfEvalData += `目標グレード: ${selfEvalData['目標グレード']}\n`;
+  if (selfEvalData['来季目標']) promptSelfEvalData += `
+来季目標: ${selfEvalData['来季目標']}
+`;
+  if (selfEvalData['目標達成のためにサポートしてほしい事']) promptSelfEvalData += `目標達成のためにサポートしてほしい事: ${selfEvalData['目標達成のためにサポートしてほしい事']}
+`;
+  if (selfEvalData['サポート方針']) promptSelfEvalData += `サポート方針: ${selfEvalData['サポート方針']}
+`;
+  if (selfEvalData['目標グレード']) promptSelfEvalData += `目標グレード: ${selfEvalData['目標グレード']}
+`;
 
   const anonymousName = `対象者`;
 
-  const geminiPrompt = `以下の${anonymousName}さんの過去1年間の日報サマリーと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。\n\n**過去1年間の日報サマリー：**\n${dailyReportSummary}\n\n**自己評価シートデータ：**\n${promptSelfEvalData}`;
+  const geminiPrompt = `以下の${anonymousName}さんの過去1年間の日報サマリーと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。
 
-  Logger.log('Geminiに送信される最終プロンプト:\n' + geminiPrompt);
+**過去1年間の日報サマリー：**
+${dailyReportSummary}
+
+**自己評価シートデータ：**
+${promptSelfEvalData}`;
+
+  const truncatedPrompt = truncateText(geminiPrompt, 200);
+  Logger.log(`Gemini APIに送信するプロンプト (総文字数: ${geminiPrompt.length}):
+${truncatedPrompt}`);
 
   try {
     const geminiResponse = callGeminiApi(geminiPrompt);
     const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
 
     const subject = `【1on1ヒアリング項目提案】${targetEmployeeName}さん向け`;
-    const body = `[info][title]${subject}[/title]\n${hearingTopics}[/info]`;
+    const body = `[info][title]${subject}[/title]
+${hearingTopics}[/info]`;
 
     sendChatworkNotification(managerRoomId, body);
     Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
