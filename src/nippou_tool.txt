@@ -125,6 +125,43 @@ function deleteTriggers() {
   Logger.log('すべてのトリガーを削除しました。');
 }
 
+// --- 日報設問管理 ---
+
+/**
+ * 「日報設問設定」シートから設問内容を読み込む。
+ * @returns {Array<{number: number, content: string, type: string, required: boolean}>}
+ */
+function getDailyReportQuestions() {
+  const sheetName = '日報設問設定';
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  if (!sheet) {
+    Logger.log(`エラー: シート「${sheetName}」が見つかりません。`);
+    return [];
+  }
+  try {
+    // ヘッダーを除き、2行目から3つの設問を読み込む
+    const data = sheet.getRange('A2:D4').getValues();
+    const questions = data.map(row => {
+      return {
+        number: row[0],
+        content: row[1],
+        type: row[2],
+        required: row[3] === true
+      };
+    }).filter(q => q.content); // 内容が空の行は無視
+
+    if (questions.length !== 3) {
+      Logger.log(`エラー: 「${sheetName}」シートの設問データが3件ではありません。 A2:D4の範囲に3件の設問を正しく入力してください。`);
+      return [];
+    }
+    return questions;
+  } catch (e) {
+    Logger.log(`エラー: 「${sheetName}」シートの読み込み中にエラーが発生しました。 ${e.message}`);
+    return [];
+  }
+}
+
+
 // --- Chatwork連携機能 ---
 
 /**
@@ -201,8 +238,24 @@ function getChatworkTargetRoomIds() {
  * 全ての部下に日報提出を促す質問をChatworkで送信する。
  */
 function sendDailyReportQuestions() {
+  const questions = getDailyReportQuestions();
+  if (questions.length === 0) {
+    Logger.log('日報の設問が「日報設問設定」シートに設定されていないため、質問送信を中止しました。');
+    SpreadsheetApp.getUi().alert('設定エラー', '「日報設問設定」シートに3件の設問を正しく設定してください。', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
   const employeeList = getChatworkTargetRoomIds();
   const pendingQuestions = getPendingQuestionMessages();
+
+  let messageBody = '#日報\r\n';
+  questions.forEach(q => {
+    messageBody += `${q.content}：`;
+    if (q.type === 'mood') {
+      messageBody += '(良い/普通/少し悪い/悪い)';
+    }
+    messageBody += '\r\n';
+  });
 
   employeeList.forEach(employee => {
     const { employeeName, employeeRoomId } = employee;
@@ -217,7 +270,7 @@ function sendDailyReportQuestions() {
       return;
     }
 
-    const message = `[To:${employeeRoomId}] ${employeeName}さん\nおはようございます！\n本日の日報を以下のフォーマットでご返信ください。\n\n#日報\n業務内容：\n気分：(良い/普通/少し悪い/悪い)\n困っていること：`;
+    const message = `[To:${employeeRoomId}] ${employeeName}さん\r\nおはようございます！\r\n本日の日報を以下のフォーマットでご返信ください。\r\n\r\n${messageBody.trim()}`;
     try {
       const response = sendChatworkNotification(employeeRoomId, message);
       const messageId = response.message_id.toString();
@@ -247,22 +300,21 @@ function processChatworkReplies() {
     if (questionsForThisRoom.length === 0) {
       return;
     }
-    
+
     const lockedQuestion = questionsForThisRoom.find(q => q.status === '返信済み_フォーマット不正' || q.status.startsWith('エラー発生'));
     if (lockedQuestion) {
-        Logger.log(`${employeeName}さん (Room ID: ${employeeRoomId}) の日報はロックステータス（${lockedQuestion.status}）のためスキップしました。`);
-        return;
+      Logger.log(`${employeeName}さん (Room ID: ${employeeRoomId}) の日報はロックステータス（${lockedQuestion.status}）のためスキップしました。`);
+      return;
     }
 
     try {
       const messages = getChatworkMessages(employeeRoomId, 50);
-      let processedThisRoom = false;
 
       for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
         if (msg.account_id && msg.account_id.toString() === botAccountId) continue;
 
-        const replyMatch = msg.body.match(/\[rp aid=(\d+) to=(\d+)-(\d+)\]/);
+        const replyMatch = msg.body.match(/[\[]rp aid=(\d+) to=(\d+)-(\d+)[\]]/);
         if (!replyMatch) continue;
 
         const repliedToMessageId = replyMatch[3];
@@ -286,8 +338,7 @@ function processChatworkReplies() {
               updateQuestionStatus(employeeRoomId, matchedQuestion.messageId, '返信済み_フォーマット不正', validationResult.message);
             }
           }
-          processedThisRoom = true;
-          break;
+          break; 
         }
       }
     } catch (e) {
@@ -317,37 +368,74 @@ function getChatworkMessages(roomId, count) {
 }
 
 /**
- * Chatworkメッセージから日報データを抽出する。
+ * Chatworkメッセージから日報データを動的に抽出する。
  */
 function parseReportFromMessage(name, messageBody) {
-  const workContentMatch = messageBody.match(/業務内容：\s*([\s\S]*?)(?=\n*気分：|\n*困っていること：|$)/);
-  const moodMatch = messageBody.match(/気分：\s*([\s\S]*?)(?=\n*困っていること：|$)/);
-  const problemsMatch = messageBody.match(/困っていること：\s*([\s\S]*)/);
-  return {
+  const questions = getDailyReportQuestions();
+  const reportData = {
     date: new Date().toLocaleString('ja-JP'),
     name: name,
-    workContent: workContentMatch ? workContentMatch[1].trim() : 'N/A',
-    mood: moodMatch ? moodMatch[1].trim() : 'N/A',
-    problems: problemsMatch ? problemsMatch[1].trim() : '特になし'
+    answers: []
   };
+
+  const answersMap = new Map();
+  questions.forEach(q => {
+    answersMap.set(q.content, '');
+  });
+
+  // 冒頭の返信部分（[rp aid=...）を削除
+  const bodyOnly = messageBody.replace(/[\[]rp aid=[\s\S]*?[\]]\r?\n/, '');
+  const lines = bodyOnly.split(/\r?\n/);
+
+  lines.forEach(line => {
+    for (const question of questions) {
+      const keyword = `${question.content}：`;
+      if (line.startsWith(keyword)) {
+        const answer = line.substring(keyword.length).trim();
+        answersMap.set(question.content, answer);
+        break;
+      }
+    }
+  });
+
+  questions.forEach(q => {
+    reportData.answers.push({
+      question: q.content,
+      answer: answersMap.get(q.content) || '',
+      type: q.type,
+      required: q.required
+    });
+  });
+
+  return reportData;
 }
 
+
 /**
- * 日報データのバリデーションを行う。
+ * 日報データの動的バリデーションを行う。
  */
 function validateDailyReport(reportData) {
-  const moods = ['良い', '普通', '少し悪い', '悪い'];
-  if (!reportData.name || reportData.name.trim() === 'N/A') {
-    return { isValid: false, message: '氏名が空です。' };
-  }
-  if (!reportData.workContent || reportData.workContent.trim() === 'N/A') {
-    return { isValid: false, message: '業務内容が空です。' };
-  }
-  if (!reportData.mood || !moods.includes(reportData.mood.trim())) {
-    return { isValid: false, message: `気分に不正な値「${reportData.mood}」が入力されています。` };
+  for (const item of reportData.answers) {
+    if (item.required && !item.answer) {
+      return { isValid: false, message: `必須項目「${item.question}」が未入力です。` };
+    }
+
+    if (item.answer) {
+      if (item.type === 'mood') {
+        const moods = ['良い', '普通', '少し悪い', '悪い'];
+        if (!moods.includes(item.answer)) {
+          return { isValid: false, message: `「${item.question}」の回答が不正です。指定された選択肢から選んでください。` };
+        }
+      } else if (item.type === 'number') {
+        if (isNaN(Number(item.answer))) {
+          return { isValid: false, message: `「${item.question}」の回答は数値を入力してください。` };
+        }
+      }
+    }
   }
   return { isValid: true, message: '' };
 }
+
 
 // --- Gemini API & 通知機能 ---
 
@@ -358,7 +446,12 @@ function validateDailyReport(reportData) {
  * @param {string} managerRoomId マネージャーのルームID
  */
 function assessAndNotify(reportData, managerName, managerRoomId) {
-  const geminiPrompt = `以下の日報の内容を分析し、提出者の現在の心理状態や業務の調子について、5段階（非常に良い、良い、普通、少し悪い、危険）で評価してください。\n**特に「今日の気分」が悪い場合や、「困っていること」にネガティブな兆候が見られる場合は「危険」と判断し、その理由も簡潔に述べてください。**\n氏名は匿名化し、「提出者」として言及してください。\n\n業務内容：${reportData.workContent}\n気分：${reportData.mood}\n困っていること：${reportData.problems}\n\n結果はJSON形式で返してください。例: { "status": "危険", "reason": "具体例：今日の気分が悪いと申告しており、困っている内容にXXとあるため。" }`;
+  let promptContent = '';
+  reportData.answers.forEach(item => {
+    promptContent += `${item.question}: ${item.answer}\r\n`;
+  });
+
+  const geminiPrompt = `以下の日報の内容を分析し、提出者の現在の心理状態や業務の調子について、5段階（非常に良い、良い、普通、少し悪い、危険）で評価してください。\r\n**特に気分が悪い、または困っていることにネガティブな兆候が見られる場合は「危険」と判断し、その理由も簡潔に述べてください。**\r\n氏名は匿名化し、「提出者」として言及してください。\r\n\r\n--- 日報内容 ---\r\n${promptContent}--- ここまで ---\r\n\r\n結果はJSON形式で返してください。例: { "status": "危険", "reason": "具体例：気分が悪いと申告しており、困っている内容にXXとあるため。" }`;
   let geminiStatus = '不明';
   let geminiReason = 'Gemini APIからの応答がありませんでした。';
 
@@ -382,7 +475,15 @@ function assessAndNotify(reportData, managerName, managerRoomId) {
       Logger.log("マネージャーのChatworkルームIDが不明なため、通知をスキップします。");
     } else {
       const subject = `【注意】日報から社員の調子に懸念 - ${reportData.name}`;
-      const body = `[info][title]${subject}[/title]提出者：${reportData.name}\n日付：${reportData.date}\nGemini AIによる評価：${geminiStatus}\n理由：${geminiReason}\n[hr]▼ 日報抜粋\n今日の気分：${reportData.mood}\n困っていること：${reportData.problems}\n[hr]詳細については、スプレッドシートをご確認ください。[/info]`;
+      
+      let reportExcerpt = '';
+      reportData.answers.forEach(item => {
+        if (item.answer) {
+          reportExcerpt += `${item.question}：${item.answer}\r\n`;
+        }
+      });
+
+      const body = `[info][title]${subject}[/title]提出者：${reportData.name}\r\n日付：${reportData.date}\r\nGemini AIによる評価：${geminiStatus}\r\n理由：${geminiReason}\r\n[hr]▼ 日報抜粋\r\n${reportExcerpt.trim()}\r\n[hr]詳細については、スプレッドシートをご確認ください。[/info]`;
       try {
         sendChatworkNotification(managerRoomId, body);
         Logger.log('Chatworkへの注意通知が正常に送信されました。');
@@ -391,7 +492,7 @@ function assessAndNotify(reportData, managerName, managerRoomId) {
       }
     }
   }
-  
+
   try {
     logReportToSheet(reportData, geminiStatus, geminiReason, managerName);
   } catch (e) {
@@ -412,19 +513,26 @@ function logReportToSheet(reportData, status, reason, managerName) {
   if (!sheet) {
     throw new Error(`シート「${logSheetName}」が見つかりません。`);
   }
-  sheet.appendRow([
+
+  const logData = [
     new Date(),           // タイムスタンプ
     managerName || 'N/A', // マネージャー名
     reportData.name,      // 氏名
     reportData.date,      // 日報日付
-    reportData.workContent,
-    reportData.mood,
-    reportData.problems,
-    status,
-    reason
-  ]);
+  ];
+
+  // 動的に設問と回答を追加
+  reportData.answers.forEach(item => {
+    logData.push(item.question);
+    logData.push(item.answer);
+  });
+
+  logData.push(status, reason);
+
+  sheet.appendRow(logData);
   Logger.log(`日報データを「${logSheetName}」シートに記録しました。`);
 }
+
 
 /**
  * Chatworkにメッセージを送信する汎用関数。
@@ -588,14 +696,11 @@ function getDailyReportDataForEmployee(employeeName) {
 
   const nameCol = headerMap['氏名'];
   const dateCol = headerMap['日報日付'];
-  const moodCol = headerMap['今日の気分'];
-  const problemsCol = headerMap['困っていること'];
-  const workContentCol = headerMap['今日の業務内容'];
   const aiStatusCol = headerMap['AI評価状態'];
   const aiReasonCol = headerMap['AI評価理由'];
 
-  if (nameCol === undefined || dateCol === undefined || moodCol === undefined || problemsCol === undefined || workContentCol === undefined || aiStatusCol === undefined || aiReasonCol === undefined) {
-    Logger.log('日報ログシートのヘッダーが不正です。');
+  if (nameCol === undefined || dateCol === undefined || aiStatusCol === undefined || aiReasonCol === undefined) {
+    Logger.log('日報ログシートの必須ヘッダー（氏名, 日報日付, AI評価状態, AI評価理由）が不正です。');
     return '日報ログシートのヘッダーが不正なため、データを読み込めませんでした。';
   }
 
@@ -612,74 +717,36 @@ function getDailyReportDataForEmployee(employeeName) {
     return '過去1年間の日報ログはありません。';
   }
 
-  // --- 日報ログの集約・要約 ---
-  const moodCounts = { '非常に良い': 0, '良い': 0, '普通': 0, '少し悪い': 0, '危険': 0 };
-  const negativeAIEvals = [];
-  const problemKeywords = {
-    '疲労': 0, '残業': 0, '人間関係': 0, '遅延': 0, 'プレッシャー': 0, 'モチベーション': 0, 'コミュニケーション': 0, 'スキル': 0, '不明点': 0, '認識齟齬': 0
-  };
-  const positiveWorkContents = [];
+  let summary = `過去1年間の日報サマリー (${employeeReports.length}件のデータ):\r\n`;
 
   employeeReports.forEach(report => {
-    const mood = report[moodCol] ? report[moodCol].toString().trim() : '';
-    if (moodCounts.hasOwnProperty(mood)) {
-      moodCounts[mood]++;
-    }
+    const reportDate = report[dateCol] ? new Date(report[dateCol]).toLocaleDateString('ja-JP') : '';
+    summary += `\r\n--- ${reportDate} ---\r\n`;
+    // 設問1から3までの内容と回答を要約に追加
+    for (let i = 1; i <= 3; i++) {
+      const questionHeader = `設問${i}内容`;
+      const answerHeader = `設問${i}回答`;
+      const questionColIndex = headerMap[questionHeader];
+      const answerColIndex = headerMap[answerHeader];
 
-    const aiStatus = report[aiStatusCol] ? report[aiStatusCol].toString().trim() : '';
-    if (aiStatus === '危険' || aiStatus === '少し悪い') {
-      const reportDate = report[dateCol] ? new Date(report[dateCol]).toLocaleDateString('ja-JP') : '';
-      const aiReason = report[aiReasonCol] ? report[aiReasonCol].toString().trim() : '';
-      negativeAIEvals.push(`- ${reportDate}: ${aiStatus} (${aiReason})`);
-    }
-
-    const problems = report[problemsCol] ? report[problemsCol].toString().trim() : '';
-    for (const keyword in problemKeywords) {
-      if (problems.includes(keyword)) {
-        problemKeywords[keyword]++;
+      if (questionColIndex !== undefined && answerColIndex !== undefined) {
+        const question = report[questionColIndex];
+        const answer = report[answerColIndex];
+        if (question && answer) {
+          summary += `${question}: ${answer}\r\n`;
+        }
       }
     }
-
-    const workContent = report[workContentCol] ? report[workContentCol].toString().trim() : '';
-    if (mood === '良い' || mood === '非常に良い') {
-      positiveWorkContents.push(`- ${workContent.substring(0, 50)}...`); // 業務内容を短縮
+    const aiStatus = report[aiStatusCol];
+    if (aiStatus === '危険' || aiStatus === '少し悪い') {
+      summary += `AI評価: ${aiStatus} (${report[aiReasonCol] || '理由なし'})\r\n`;
     }
   });
-
-  let summary = `過去1年間の日報サマリー (${employeeReports.length}件のデータ):
-`;
-
-  summary += `\n気分傾向:
-`;
-  for (const mood in moodCounts) {
-    if (moodCounts[mood] > 0) {
-      summary += `  - ${mood}: ${moodCounts[mood]}回\n`;
-    }
-  }
-
-  if (negativeAIEvals.length > 0) {
-    summary += `\nAI評価「危険」または「少し悪い」の履歴:\n`;
-    summary += negativeAIEvals.join('\n') + '\n';
-  }
-
-  const frequentProblems = Object.entries(problemKeywords).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
-  if (frequentProblems.length > 0) {
-    summary += `\n繰り返し現れる課題キーワード:\n`;
-    frequentProblems.forEach(([keyword, count]) => {
-      summary += `  - ${keyword}: ${count}回\n`;
-    });
-  }
-
-  if (positiveWorkContents.length > 0) {
-    summary += `\nポジティブな業務内容の抜粋 (直近5件):\n`;
-    positiveWorkContents.slice(-5).forEach(content => {
-      summary += `  ${content}\n`;
-    });
-  }
 
   Logger.log(`${employeeName}さんの日報ログ要約が完了しました。`);
   return summary;
 }
+
 
 /**
  * Googleドライブから指定された社員の自己評価シートを読み込み、データを抽出する。
@@ -898,34 +965,34 @@ function generate1on1Topics() {
   let promptSelfEvalData = '';
 
   if (selfEvalData.evaluationPeriod) {
-    promptSelfEvalData += `評価期間: ${selfEvalData.evaluationPeriod}\n`;
+    promptSelfEvalData += `評価期間: ${selfEvalData.evaluationPeriod}\r\n`;
   }
 
   selfEvalData.questions.forEach(q => {
-    promptSelfEvalData += `\n設問: ${q.questionContent}\n`;
-    if (q.selfComment) promptSelfEvalData += `  本人コメント: ${q.selfComment}\n`;
-    if (q.selfEvaluation) promptSelfEvalData += `  自己評価: ${q.selfEvaluation}\n`;
-    if (q.managerComment) promptSelfEvalData += `  マネージャコメント: ${q.managerComment}\n`;
-    if (q.managerEvaluation) promptSelfEvalData += `  マネージャ評価: ${q.managerEvaluation}\n`;
+    promptSelfEvalData += `\r\n設問: ${q.questionContent}\r\n`;
+    if (q.selfComment) promptSelfEvalData += `  本人コメント: ${q.selfComment}\r\n`;
+    if (q.selfEvaluation) promptSelfEvalData += `  自己評価: ${q.selfEvaluation}\r\n`;
+    if (q.managerComment) promptSelfEvalData += `  マネージャコメント: ${q.managerComment}\r\n`;
+    if (q.managerEvaluation) promptSelfEvalData += `  マネージャ評価: ${q.managerEvaluation}\r\n`;
   });
 
-  if (selfEvalData['来季目標']) promptSelfEvalData += `\n来季目標: ${selfEvalData['来季目標']}\n`;
-  if (selfEvalData['目標達成のためにサポートしてほしい事']) promptSelfEvalData += `目標達成のためにサポートしてほしい事: ${selfEvalData['目標達成のためにサポートしてほしい事']}\n`;
-  if (selfEvalData['サポート方針']) promptSelfEvalData += `サポート方針: ${selfEvalData['サポート方針']}\n`;
-  if (selfEvalData['目標グレード']) promptSelfEvalData += `目標グレード: ${selfEvalData['目標グレード']}\n`;
+  if (selfEvalData['来季目標']) promptSelfEvalData += `\r\n来季目標: ${selfEvalData['来季目標']}\r\n`;
+  if (selfEvalData['目標達成のためにサポートしてほしい事']) promptSelfEvalData += `目標達成のためにサポートしてほしい事: ${selfEvalData['目標達成のためにサポートしてほしい事']}\r\n`;
+  if (selfEvalData['サポート方針']) promptSelfEvalData += `サポート方針: ${selfEvalData['サポート方針']}\r\n`;
+  if (selfEvalData['目標グレード']) promptSelfEvalData += `目標グレード: ${selfEvalData['目標グレード']}\r\n`;
 
   const anonymousName = `対象者`;
 
-  const geminiPrompt = `以下の${anonymousName}さんの過去1年間の日報サマリーと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。\n\n**過去1年間の日報サマリー：**\n${dailyReportSummary}\n\n**自己評価シートデータ：**\n${promptSelfEvalData}`;
+  const geminiPrompt = `以下の${anonymousName}さんの過去1年間の日報サマリーと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。\r\n\r\n**過去1年間の日報サマリー：**\r\n${dailyReportSummary}\r\n\r\n**自己評価シートデータ：**\r\n${promptSelfEvalData}`;
 
-  Logger.log('Geminiに送信される最終プロンプト:\n' + geminiPrompt);
+  Logger.log('Geminiに送信される最終プロンプト:\r\n' + geminiPrompt);
 
   try {
     const geminiResponse = callGeminiApi(geminiPrompt);
     const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
 
     const subject = `【1on1ヒアリング項目提案】${targetEmployeeName}さん向け`;
-    const body = `[info][title]${subject}[/title]\n${hearingTopics}[/info]`;
+    const body = `[info][title]${subject}[/title]\r\n${hearingTopics}[/info]`;
 
     sendChatworkNotification(managerRoomId, body);
     Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
