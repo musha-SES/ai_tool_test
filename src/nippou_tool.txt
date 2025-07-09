@@ -433,17 +433,27 @@ function sendChatworkNotification(roomId, message) {
   try {
     const apiKey = getChatworkApiKey();
     const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
-    const payload = { body: message, self_unread: 1 };
+
+    // Chatwork記法がエンコードされないように、特殊なエンコード処理を実装します。
+    // 1. 全体をエンコードして安全性を確保
+    let encodedMessage = encodeURIComponent(message);
+    // 2. Chatwork記法で使われる角括弧 [], スラッシュ / のみデコードして戻す
+    encodedMessage = encodedMessage.replace(/%5B/g, '[').replace(/%5D/g, ']').replace(/%2F/g, '/');
+
+    const payloadString = `body=${encodedMessage}&self_unread=1`;
+
     const options = {
       method: 'post',
       headers: { 'X-ChatWorkToken': apiKey },
       contentType: 'application/x-www-form-urlencoded',
-      payload: Object.keys(payload).map(key => `${key}=${encodeURIComponent(payload[key])}`).join('&'),
+      payload: payloadString,
       muteHttpExceptions: true
     };
+
     const response = UrlFetchApp.fetch(url, options);
     const responseCode = response.getResponseCode();
     const responseText = response.getContentText();
+
     if (responseCode !== 200) {
       throw new Error(`Chatwork API送信失敗。Status: ${responseCode}, Response: ${responseText}`);
     }
@@ -666,9 +676,7 @@ function getDailyReportDataForEmployee(employeeName) {
     summary += `
 AI評価「危険」または「少し悪い」の履歴:
 `;
-    summary += negativeAIEvals.join('
-') + '
-';
+    summary += negativeAIEvals.join('') + '';
   }
 
   const frequentProblems = Object.entries(problemKeywords).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
@@ -929,55 +937,75 @@ function generate1on1Topics() {
   let promptSelfEvalData = '';
 
   if (selfEvalData.evaluationPeriod) {
-    promptSelfEvalData += `評価期間: ${selfEvalData.evaluationPeriod}
-`;
+    promptSelfEvalData += `評価期間: ${selfEvalData.evaluationPeriod}\n`;
   }
 
   selfEvalData.questions.forEach(q => {
-    promptSelfEvalData += `
-設問: ${q.questionContent}
-`;
-    if (q.selfComment) promptSelfEvalData += `  本人コメント: ${q.selfComment}
-`;
-    if (q.selfEvaluation) promptSelfEvalData += `  自己評価: ${q.selfEvaluation}
-`;
-    if (q.managerComment) promptSelfEvalData += `  マネージャコメント: ${q.managerComment}
-`;
-    if (q.managerEvaluation) promptSelfEvalData += `  マネージャ評価: ${q.managerEvaluation}
-`;
+    promptSelfEvalData += `\n設問: ${q.questionContent}\n`;
+    if (q.selfComment) promptSelfEvalData += `  本人コメント: ${q.selfComment}\n`;
+    if (q.selfEvaluation) promptSelfEvalData += `  自己評価: ${q.selfEvaluation}\n`;
+    if (q.managerComment) promptSelfEvalData += `  マネージャコメント: ${q.managerComment}\n`;
+    if (q.managerEvaluation) promptSelfEvalData += `  マネージャ評価: ${q.managerEvaluation}\n`;
   });
 
-  if (selfEvalData['来季目標']) promptSelfEvalData += `
-来季目標: ${selfEvalData['来季目標']}
-`;
-  if (selfEvalData['目標達成のためにサポートしてほしい事']) promptSelfEvalData += `目標達成のためにサポートしてほしい事: ${selfEvalData['目標達成のためにサポートしてほしい事']}
-`;
-  if (selfEvalData['サポート方針']) promptSelfEvalData += `サポート方針: ${selfEvalData['サポート方針']}
-`;
-  if (selfEvalData['目標グレード']) promptSelfEvalData += `目標グレード: ${selfEvalData['目標グレード']}
-`;
+  if (selfEvalData['来季目標']) promptSelfEvalData += `\n来季目標: ${selfEvalData['来季目標']}\n`;
+  if (selfEvalData['目標達成のためにサポートしてほしい事']) promptSelfEvalData += `目標達成のためにサポートしてほしい事: ${selfEvalData['目標達成のためにサポートしてほしい事']}\n`;
+  if (selfEvalData['サポート方針']) promptSelfEvalData += `サポート方針: ${selfEvalData['サポート方針']}\n`;
+  if (selfEvalData['目標グレード']) promptSelfEvalData += `目標グレード: ${selfEvalData['目標グレード']}\n`;
 
   const anonymousName = `対象者`;
 
-  const geminiPrompt = `以下の${anonymousName}さんの過去1年間の日報サマリーと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。
-
-**過去1年間の日報サマリー：**
-${dailyReportSummary}
-
-**自己評価シートデータ：**
-${promptSelfEvalData}`;
+  const geminiPrompt = `以下の${anonymousName}さんの過去1年間の日報サマリーと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。\n\n**過去1年間の日報サマリー：**\n${dailyReportSummary}\n\n**自己評価シートデータ：**\n${promptSelfEvalData}`;
 
   const truncatedPrompt = truncateText(geminiPrompt, 200);
-  Logger.log(`Gemini APIに送信するプロンプト (総文字数: ${geminiPrompt.length}):
-${truncatedPrompt}`);
+  Logger.log(`Gemini APIに送信するプロンプト (総文字数: ${geminiPrompt.length}):\n${truncatedPrompt}`);
 
   try {
-    const geminiResponse = callGeminiApi(geminiPrompt);
-    const hearingTopics = geminiResponse.candidates[0].content.parts[0].text;
+    // Gemini API呼び出しをコメントアウトし、ダミーデータを使用
+    // const geminiResponse = callGeminiApi(geminiPrompt);
+    // const hearingTopicsRaw = geminiResponse.candidates[0].content.parts[0].text;
+
+    // --- 整形ロジックテスト用のダミーデータ ---
+    const hearingTopicsRaw = `*1. リーダーシップについて、最近のチーム内のコミュニケーションの課題をどのように乗り越えましたか？
+*具体的な質問と根拠*日報サマリーで「チーム内の意見がまとまらず議論が長引いた」と報告されており、自己評価シートでも「周囲を巻き込む」点が課題として挙げられています。
+
+*2. 目標達成に向けた進捗と課題について、特に予期せぬ問題への対応で感じたことはありますか？
+*具体的な質問と根拠*日報サマリーで「予期せぬ障害発生で徹夜での対応となった」と報告されており、自己評価シートでも「緊急対応」への言及があります。
+
+*3. 新しい技術の学習と導入について、具体的にどのような進捗があり、何か困っていることはありますか？
+*具体的な質問と根拠*日報サマリーで「新しい技術の習得に時間がかかり焦りを感じる」と報告されています。
+
+*4. 顧客との関係性構築について、最近のフィードバックから何か気づきはありましたか？
+*具体的な質問と根拠*日報サマリーで「顧客からの厳しい指摘を受け精神的に参っている」と報告されています。
+
+*5. 業務負荷のバランスについて、現在のタスク量で無理なく業務を進められていますか？
+*具体的な質問と根拠*日報サマリーで「タスクが山積みで全てを期日までに終えられない」と報告されています.`;
+    // --- ダミーデータここまで ---
+
+    // --- Chatwork通知メッセージの整形ロジック ---
+    const parts = hearingTopicsRaw.split(/\n\s*/);
+    let formattedTopics = '';
+
+    parts.forEach((part, index) => {
+      const match = part.match(/\*\d+\.\s(.*?)\*具体的な質問と根拠\*(.*)/s);
+      if (match) {
+        const question = match[1].trim();
+        const rationale = match[2].trim();
+        const truncatedRationale = truncateText(rationale, 100);
+        
+        formattedTopics += `${index + 1}. ${question}\n`;
+        formattedTopics += `   根拠: ${truncatedRationale}\n\n`;
+      }
+    });
+    
+    if (formattedTopics === '') {
+      // 解析に失敗した場合のフォールバック
+      formattedTopics = hearingTopicsRaw;
+    }
+    // --- 整形ロジックここまで ---
 
     const subject = `【1on1ヒアリング項目提案】${targetEmployeeName}さん向け`;
-    const body = `[info][title]${subject}[/title]
-${hearingTopics}[/info]`;
+    const body = `${subject}\n[hr]\n\n▼ 提案されたヒアリング項目\n\n${formattedTopics.trim()}\n\n[hr]\nこの提案は、日報ログと自己評価シートの分析に基づいています。詳細なデータはスプレッドシートをご確認ください。`;
 
     sendChatworkNotification(managerRoomId, body);
     Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
