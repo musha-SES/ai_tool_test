@@ -552,7 +552,7 @@ function getGeminiApiKey() {
 function callGeminiApi(prompt) {
   try {
     const apiKey = getGeminiApiKey();
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`; // モデル名を gemini-2.0-flash に変更
     const requestBody = { contents: [{ parts: [{ text: prompt }] }] };
     const options = {
       method: 'post',
