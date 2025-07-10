@@ -985,29 +985,49 @@ function generate1on1Topics() {
     const hearingTopicsRaw = geminiResponse.candidates[0].content.parts[0].text;
 
     // --- Chatwork通知メッセージの整形ロジック ---
-    const parts = hearingTopicsRaw.split(/\n\s*/);
-    let formattedTopics = '';
+    // Markdown記号を削除するヘルパー関数
+    const removeMarkdown = (text) => {
+      return text.replace(/\*\*/g, '').replace(/\*/g, '');
+    };
 
-    parts.forEach((part, index) => {
-      const match = part.match(/\*\d+\.\s(.*?)\*具体的な質問と根拠\*(.*)/s);
+    const lines = hearingTopicsRaw.split('\n');
+    let formattedTopics = '';
+    let topicCount = 0;
+
+    lines.forEach(line => {
+      // 各質問は「N. [質問内容]」で始まり、その後に「具体的な質問と根拠」が続く形式を想定
+      const match = line.match(/^(\d+)\.\s*(.*?)(?:具体的な質問と根拠)?\s*(.*)$/);
       if (match) {
-        const question = match[1].trim();
-        const rationale = match[2].trim();
-        const truncatedRationale = truncateText(rationale, 100);
+        const questionNumber = parseInt(match[1]);
+        const question = removeMarkdown(match[2].trim());
+        let rationale = removeMarkdown(match[3].trim());
+
+        // 根拠が空の場合、次の行に根拠がある可能性を考慮
+        if (!rationale && lines[lines.indexOf(line) + 1]) {
+          const nextLine = lines[lines.indexOf(line) + 1];
+          const rationaleMatch = nextLine.match(/^(?:根拠:)?\s*(.*)$/);
+          if (rationaleMatch) {
+            rationale = removeMarkdown(rationaleMatch[1].trim());
+          }
+        }
         
-        formattedTopics += `${index + 1}. ${question}\n`;
+        // 根拠が長文の場合、truncateText関数を使用して最大100文字程度に短縮
+        const truncatedRationale = truncateText(rationale, 100);
+
+        formattedTopics += `${questionNumber}. ${question}\n`;
         formattedTopics += `   根拠: ${truncatedRationale}\n\n`;
+        topicCount++;
       }
     });
     
-    if (formattedTopics === '') {
-      // 解析に失敗した場合のフォールバック
-      formattedTopics = hearingTopicsRaw;
+    if (topicCount === 0) {
+      // 解析に失敗した場合のフォールバックとして、Markdown記号だけ除去してそのまま表示
+      formattedTopics = removeMarkdown(hearingTopicsRaw);
     }
     // --- 整形ロジックここまで ---
 
     const subject = `【1on1ヒアリング項目提案】${targetEmployeeName}さん向け`;
-    const body = `${subject}\n[hr]\n\n▼ 提案されたヒアリング項目\n\n${formattedTopics.trim()}\n\n[hr]\nこの提案は、日報ログと自己評価シートの分析に基づいています。詳細なデータはスプレッドシートをご確認ください。`;
+    const body = `${subject}\n[hr]\n\n▼ 提案されたヒアリング項目\n\n${formattedTopics.trim()}\n\n[hr]\nこの提案は、日報ログと自己評価シートの分析に基づいています。詳細なデータはスプレッドシートをご確認ください`;
 
     sendChatworkNotification(managerRoomId, body);
     Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
