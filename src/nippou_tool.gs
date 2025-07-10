@@ -985,10 +985,7 @@ function generate1on1Topics() {
     const hearingTopicsRaw = geminiResponse.candidates[0].content.parts[0].text;
 
     // --- Chatwork通知メッセージの整形ロジック ---
-    // Markdown記号を削除するヘルパー関数
-    const removeMarkdown = (text) => {
-      return text.replace(/\*\*/g, '').replace(/\*/g, '');
-    };
+    
 
     const lines = hearingTopicsRaw.split('\n');
     let formattedTopics = '';
@@ -999,15 +996,15 @@ function generate1on1Topics() {
       const match = line.match(/^(\d+)\.\s*(.*?)(?:具体的な質問と根拠)?\s*(.*)$/);
       if (match) {
         const questionNumber = parseInt(match[1]);
-        const question = removeMarkdown(match[2].trim());
-        let rationale = removeMarkdown(match[3].trim());
+        const question = match[2].trim();
+        let rationale = match[3].trim();
 
         // 根拠が空の場合、次の行に根拠がある可能性を考慮
         if (!rationale && lines[lines.indexOf(line) + 1]) {
           const nextLine = lines[lines.indexOf(line) + 1];
           const rationaleMatch = nextLine.match(/^(?:根拠:)?\s*(.*)$/);
           if (rationaleMatch) {
-            rationale = removeMarkdown(rationaleMatch[1].trim());
+            rationale = rationaleMatch[1].trim();
           }
         }
         
@@ -1022,7 +1019,7 @@ function generate1on1Topics() {
     
     if (topicCount === 0) {
       // 解析に失敗した場合のフォールバックとして、Markdown記号だけ除去してそのまま表示
-      formattedTopics = removeMarkdown(hearingTopicsRaw);
+      formattedTopics = hearingTopicsRaw;
     }
     // --- 整形ロジックここまで ---
 
