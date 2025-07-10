@@ -625,25 +625,57 @@ function getDailyReportDataForEmployee(employeeName) {
     return '過去1年間の日報ログはありません。';
   }
 
-  // --- 日報ログの集約・要約 ---
-  const moodCounts = { '非常に良い': 0, '良い': 0, '普通': 0, '少し悪い': 0, '危険': 0 };
-  const negativeAIEvals = [];
+  // --- 日報ログの集約・要約 (ハイブリッド形式) ---
+  const moodCounts = { '非常に良い': 0, '良い': 0, '普通': 0, '少し悪い': 0, '悪い': 0 };
   const problemKeywords = {
     '疲労': 0, '残業': 0, '人間関係': 0, '遅延': 0, 'プレッシャー': 0, 'モチベーション': 0, 'コミュニケーション': 0, 'スキル': 0, '不明点': 0, '認識齟齬': 0
   };
-  const positiveWorkContents = [];
+  const positiveKeywords = new Set();
+  const representativeReports = [];
+  const processedMonths = new Set();
+
+  // AI評価が「危険」「少し悪い」の日報を優先的に収集
+  const negativeReports = employeeReports.filter(report => {
+    const aiStatus = report[aiStatusCol] ? report[aiStatusCol].toString().trim() : '';
+    return aiStatus === '危険' || aiStatus === '少し悪い';
+  });
+
+  // その他の日報から、月ごとにランダムに選択
+  const otherReports = employeeReports.filter(report => {
+    const aiStatus = report[aiStatusCol] ? report[aiStatusCol].toString().trim() : '';
+    return aiStatus !== '危険' && aiStatus !== '少し悪い';
+  });
+
+  // 代表的な日報の抜粋を収集 (最大5件)
+  const reportsToSample = [...negativeReports];
+  
+  // 負の評価の日報が5件未満の場合、他の日報から補充
+  if (reportsToSample.length < 5) {
+    const shuffledOtherReports = otherReports.sort(() => 0.5 - Math.random()); // ランダムにシャッフル
+    for (const report of shuffledOtherReports) {
+      const reportDate = new Date(report[dateCol]);
+      const monthKey = `${reportDate.getFullYear()}-${reportDate.getMonth()}`;
+      
+      if (!processedMonths.has(monthKey) && reportsToSample.length < 5) {
+        reportsToSample.push(report);
+        processedMonths.add(monthKey);
+      }
+      if (reportsToSample.length >= 5) break;
+    }
+  }
+
+  reportsToSample.slice(0, 5).forEach(report => {
+    const reportDate = report[dateCol] ? new Date(report[dateCol]).toLocaleDateString('ja-JP') : 'N/A';
+    const mood = report[moodCol] ? report[moodCol].toString().trim() : 'N/A';
+    const problems = report[problemsCol] ? truncateText(report[problemsCol].toString().trim(), 50) : '特になし';
+    const aiStatus = report[aiStatusCol] ? report[aiStatusCol].toString().trim() : 'N/A';
+    representativeReports.push(`日付: ${reportDate}, 気分: ${mood}, 困り事: ${problems}, AI評価: ${aiStatus}`);
+  });
 
   employeeReports.forEach(report => {
     const mood = report[moodCol] ? report[moodCol].toString().trim() : '';
     if (moodCounts.hasOwnProperty(mood)) {
       moodCounts[mood]++;
-    }
-
-    const aiStatus = report[aiStatusCol] ? report[aiStatusCol].toString().trim() : '';
-    if (aiStatus === '危険' || aiStatus === '少し悪い') {
-      const reportDate = report[dateCol] ? new Date(report[dateCol]).toLocaleDateString('ja-JP') : '';
-      const aiReason = report[aiReasonCol] ? report[aiReasonCol].toString().trim() : '';
-      negativeAIEvals.push(`- ${reportDate}: ${aiStatus} (${aiReason})`);
     }
 
     const problems = report[problemsCol] ? report[problemsCol].toString().trim() : '';
@@ -655,53 +687,45 @@ function getDailyReportDataForEmployee(employeeName) {
 
     const workContent = report[workContentCol] ? report[workContentCol].toString().trim() : '';
     if (mood === '良い' || mood === '非常に良い') {
-      positiveWorkContents.push(`- ${workContent.substring(0, 50)}...`); // 業務内容を短縮
+      // ポジティブな業務内容からキーワードを抽出
+      if (workContent.includes('リリース')) positiveKeywords.add('新規機能リリース');
+      if (workContent.includes('顧客') && (workContent.includes('高評価') || workContent.includes('感謝'))) positiveKeywords.add('顧客高評価');
+      if (workContent.includes('改善')) positiveKeywords.add('業務改善');
+      if (workContent.includes('達成')) positiveKeywords.add('目標達成');
     }
   });
 
-  let summary = `過去1年間の日報サマリー (${employeeReports.length}件のデータ):
-`;
+  // 要素A: 超簡潔な定量サマリー
+  let quantitativeSummary = '気分推移: ';
+  quantitativeSummary += Object.entries(moodCounts)
+    .filter(([, count]) => count > 0)
+    .map(([mood, count]) => `${mood}(${count}回)`)
+    .join(', ');
 
-  summary += `
-気分傾向:
-`;
-  for (const mood in moodCounts) {
-    if (moodCounts[mood] > 0) {
-      summary += `  - ${mood}: ${moodCounts[mood]}回
-`;
-    }
+  const frequentProblemsList = Object.entries(problemKeywords)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([keyword, count]) => `${keyword}(${count}回)`)
+    .join(', ');
+  if (frequentProblemsList) {
+    quantitativeSummary += `\n繰り返し課題: ${frequentProblemsList}`;
   }
 
-  if (negativeAIEvals.length > 0) {
-    summary += `
-AI評価「危険」または「少し悪い」の履歴:
-`;
-    summary += negativeAIEvals.join('') + '';
+  const positiveAspectsList = Array.from(positiveKeywords).join(', ');
+  if (positiveAspectsList) {
+    quantitativeSummary += `\nポジティブ事項: ${positiveAspectsList}`;
   }
 
-  const frequentProblems = Object.entries(problemKeywords).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
-  if (frequentProblems.length > 0) {
-    summary += `
-繰り返し現れる課題キーワード:
-`;
-    frequentProblems.forEach(([keyword, count]) => {
-      summary += `  - ${keyword}: ${count}回
-`;
-    });
+  // 要素B: 代表的な日報の抜粋
+  let excerptsSummary = '';
+  if (representativeReports.length > 0) {
+    excerptsSummary = `\n\n代表的な日報の抜粋 (最大5件):\n` + representativeReports.map(r => `- ${r}`).join('\n');
   }
 
-  if (positiveWorkContents.length > 0) {
-    summary += `
-ポジティブな業務内容の抜粋 (直近5件):
-`;
-    positiveWorkContents.slice(-5).forEach(content => {
-      summary += `  ${content}
-`;
-    });
-  }
+  const finalSummary = `過去1年間の日報サマリー (${employeeReports.length}件のデータ):\n${quantitativeSummary}${excerptsSummary}`;
 
   Logger.log(`${employeeName}さんの日報ログ要約が完了しました。`);
-  return summary;
+  return finalSummary;
 }
 
 /**
@@ -940,47 +964,25 @@ function generate1on1Topics() {
     promptSelfEvalData += `評価期間: ${selfEvalData.evaluationPeriod}\n`;
   }
 
-  selfEvalData.questions.forEach(q => {
-    promptSelfEvalData += `\n設問: ${q.questionContent}\n`;
-    if (q.selfComment) promptSelfEvalData += `  本人コメント: ${q.selfComment}\n`;
-    if (q.selfEvaluation) promptSelfEvalData += `  自己評価: ${q.selfEvaluation}\n`;
-    if (q.managerComment) promptSelfEvalData += `  マネージャコメント: ${q.managerComment}\n`;
-    if (q.managerEvaluation) promptSelfEvalData += `  マネージャ評価: ${q.managerEvaluation}\n`;
+  selfEvalData.questions.forEach((q, index) => {
+    promptSelfEvalData += `${index + 1}. ${q.questionContent}`;
+    if (q.selfComment) promptSelfEvalData += ` (本人コメント): ${q.selfComment}`;
+    if (q.selfEvaluation) promptSelfEvalData += ` / 自己評価: ${q.selfEvaluation}`;
+    promptSelfEvalData += `\n`;
   });
 
-  if (selfEvalData['来季目標']) promptSelfEvalData += `\n来季目標: ${selfEvalData['来季目標']}\n`;
+  if (selfEvalData['来季目標']) promptSelfEvalData += `来季目標: ${selfEvalData['来季目標']}\n`;
   if (selfEvalData['目標達成のためにサポートしてほしい事']) promptSelfEvalData += `目標達成のためにサポートしてほしい事: ${selfEvalData['目標達成のためにサポートしてほしい事']}\n`;
   if (selfEvalData['サポート方針']) promptSelfEvalData += `サポート方針: ${selfEvalData['サポート方針']}\n`;
   if (selfEvalData['目標グレード']) promptSelfEvalData += `目標グレード: ${selfEvalData['目標グレード']}\n`;
 
   const anonymousName = `対象者`;
 
-  const geminiPrompt = `以下の${anonymousName}さんの過去1年間の日報サマリーと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします。\n\n**過去1年間の日報サマリー：**\n${dailyReportSummary}\n\n**自己評価シートデータ：**\n${promptSelfEvalData}`;
-
-  const truncatedPrompt = truncateText(geminiPrompt, 200);
-  Logger.log(`Gemini APIに送信するプロンプト (総文字数: ${geminiPrompt.length}):\n${truncatedPrompt}`);
+  const geminiPrompt = `以下の${anonymousName}さんの過去1年間の日報サマリーと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします.\n\n**過去1年間の日報サマリー：**\n${dailyReportSummary}\n\n**自己評価シートデータ：**\n${promptSelfEvalData}`;
 
   try {
-    // Gemini API呼び出しをコメントアウトし、ダミーデータを使用
-    // const geminiResponse = callGeminiApi(geminiPrompt);
-    // const hearingTopicsRaw = geminiResponse.candidates[0].content.parts[0].text;
-
-    // --- 整形ロジックテスト用のダミーデータ ---
-    const hearingTopicsRaw = `*1. リーダーシップについて、最近のチーム内のコミュニケーションの課題をどのように乗り越えましたか？
-*具体的な質問と根拠*日報サマリーで「チーム内の意見がまとまらず議論が長引いた」と報告されており、自己評価シートでも「周囲を巻き込む」点が課題として挙げられています。
-
-*2. 目標達成に向けた進捗と課題について、特に予期せぬ問題への対応で感じたことはありますか？
-*具体的な質問と根拠*日報サマリーで「予期せぬ障害発生で徹夜での対応となった」と報告されており、自己評価シートでも「緊急対応」への言及があります。
-
-*3. 新しい技術の学習と導入について、具体的にどのような進捗があり、何か困っていることはありますか？
-*具体的な質問と根拠*日報サマリーで「新しい技術の習得に時間がかかり焦りを感じる」と報告されています。
-
-*4. 顧客との関係性構築について、最近のフィードバックから何か気づきはありましたか？
-*具体的な質問と根拠*日報サマリーで「顧客からの厳しい指摘を受け精神的に参っている」と報告されています。
-
-*5. 業務負荷のバランスについて、現在のタスク量で無理なく業務を進められていますか？
-*具体的な質問と根拠*日報サマリーで「タスクが山積みで全てを期日までに終えられない」と報告されています.`;
-    // --- ダミーデータここまで ---
+    const geminiResponse = callGeminiApi(geminiPrompt);
+    const hearingTopicsRaw = geminiResponse.candidates[0].content.parts[0].text;
 
     // --- Chatwork通知メッセージの整形ロジック ---
     const parts = hearingTopicsRaw.split(/\n\s*/);
