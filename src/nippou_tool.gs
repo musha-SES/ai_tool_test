@@ -1037,10 +1037,9 @@ function generate1on1Topics() {
         questionCount++;
         const question = questionMatch[1].replace(/\*/g, '').trim();
         const rationale = rationaleMatch[1].replace(/\*/g, '').trim();
-        const truncatedRationale = truncateText(rationale);
 
         formattedTopics += `${questionCount}. ${question}\n`;
-        formattedTopics += `   根拠: ${truncatedRationale}\n\n`;
+        formattedTopics += `   根拠: ${rationale}\n\n`;
       }
     });
 
