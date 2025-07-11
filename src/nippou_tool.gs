@@ -315,7 +315,7 @@ function processChatworkReplies() {
         const msg = messages[i];
         if (msg.account_id && msg.account_id.toString() === botAccountId) continue;
 
-        const replyMatch = msg.body.match(/\[rp aid=(\d+) to=(\d+)-(\d+)\]/);
+        const replyMatch = msg.body.match(/[[]rp aid=(\d+) to=(\d+)-(\d+)[]]/);
         if (!replyMatch) continue;
 
         const repliedToMessageId = replyMatch[3];
@@ -1017,42 +1017,36 @@ function generate1on1Topics() {
 
   const anonymousName = `対象者`;
 
-  const geminiPrompt = `以下の${anonymousName}さんの過去1年間の日報サマリーと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。提案は箇条書き形式でお願いします.\n\n**過去1年間の日報サマリー：**\n${dailyReportSummary}\n\n**自己評価シートデータ：**\n${promptSelfEvalData}`;
+  const geminiPrompt = `以下の${anonymousName}さんの過去1年間の日報サマリーと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。\n\n**過去1年間の日報サマリー：**\n${dailyReportSummary}\n\n**自己評価シートデータ：**\n${promptSelfEvalData}\n\n---\n\n**【重要】回答フォーマットの厳守**\n以下のフォーマットに厳密に従って、5つのヒアリング項目を提案してください。各項目は、質問と根拠を明確に分けて記述してください。\n\n*1. [ここに1つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに1つ目の質問の根拠を記述]\n\n*2. [ここに2つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに2つ目の質問の根拠を記述]\n\n*3. [ここに3つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに3つ目の質問の根拠を記述]\n\n*4. [ここに4つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに4つ目の質問の根拠を記述]\n\n*5. [ここに5つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに5つ目の質問の根拠を記述]`;
 
   try {
     const geminiResponse = callGeminiApi(geminiPrompt);
     const hearingTopicsRaw = geminiResponse.candidates[0].content.parts[0].text;
+    Logger.log('--- Geminiからの生応答 ---\n' + hearingTopicsRaw);
 
-    // --- Chatwork通知メッセージの整形ロジック ---
-    const lines = hearingTopicsRaw.split('\n');
+    // --- Chatwork通知メッセージの整形ロジック（修正版） ---
     let formattedTopics = '';
-    let topicCount = 0;
+    const topics = hearingTopicsRaw.split(/\n\s*\n/); // 質問・根拠のペアで分割
 
-    lines.forEach(line => {
-      const match = line.match(/^(\d+)\.\s*(.*?)(?:具体的な質問と根拠)?\s*(.*)$/);
-      if (match) {
-        const questionNumber = parseInt(match[1]);
-        const question = match[2].trim();
-        let rationale = match[3].trim();
+    let questionCount = 0;
+    topics.forEach(topic => {
+      const questionMatch = topic.match(/\*\d+\.\s*([\s\S]*?)(?=\n\*具体的な質問と根拠\*)/);
+      const rationaleMatch = topic.match(/\*具体的な質問と根拠\*([\s\S]*)/);
 
-        if (!rationale && lines[lines.indexOf(line) + 1]) {
-          const nextLine = lines[lines.indexOf(line) + 1];
-          const rationaleMatch = nextLine.match(/^(?:根拠:)?\s*(.*)$/);
-          if (rationaleMatch) {
-            rationale = rationaleMatch[1].trim();
-          }
-        }
-        
+      if (questionMatch && questionMatch[1] && rationaleMatch && rationaleMatch[1]) {
+        questionCount++;
+        const question = questionMatch[1].replace(/\*/g, '').trim();
+        const rationale = rationaleMatch[1].replace(/\*/g, '').trim();
         const truncatedRationale = truncateText(rationale);
 
-        formattedTopics += `${questionNumber}. ${question}\n`;
+        formattedTopics += `${questionCount}. ${question}\n`;
         formattedTopics += `   根拠: ${truncatedRationale}\n\n`;
-        topicCount++;
       }
     });
-    
-    if (topicCount === 0) {
-      formattedTopics = hearingTopicsRaw;
+
+    if (questionCount === 0) {
+      Logger.log('Gemini応答の解析に失敗しました。正規表現が期待通りにマッチしませんでした。フォールバックとして生テキストを送信します。');
+      formattedTopics = hearingTopicsRaw.replace(/\*/g, ''); // Markdown記号を除去
     }
     // --- 整形ロジックここまで ---
 
