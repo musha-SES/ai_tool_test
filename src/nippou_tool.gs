@@ -309,13 +309,12 @@ function processChatworkReplies() {
 
     try {
       const messages = getChatworkMessages(employeeRoomId, 50);
-      let processedThisRoom = false;
 
       for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
         if (msg.account_id && msg.account_id.toString() === botAccountId) continue;
 
-        const replyMatch = msg.body.match(/[[]rp aid=(\d+) to=(\d+)-(\d+)[]]/);
+        const replyMatch = msg.body.match(/\[rp aid=(\d+) to=(\d+)-(\d+)\]/);
         if (!replyMatch) continue;
 
         const repliedToMessageId = replyMatch[3];
@@ -339,8 +338,7 @@ function processChatworkReplies() {
               updateQuestionStatus(employeeRoomId, matchedQuestion.messageId, '返信済み_フォーマット不正', validationResult.message);
             }
           }
-          processedThisRoom = true;
-          break;
+          break; // このルームの処理を終了
         }
       }
     } catch (e) {
