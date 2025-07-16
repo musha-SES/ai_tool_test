@@ -1393,7 +1393,24 @@ function generateTeamSummaryReportWithGemini(summaryData, groupName) {
   const problemsSummary = summaryData.commonProblems.length > 0 ? summaryData.commonProblems.join(', ') : '特筆すべき共通課題は報告されていません。';
   const positivesSummary = summaryData.positiveTrends.length > 0 ? summaryData.positiveTrends.join(', ') : '特筆すべきポジティブな動きは報告されていません。';
 
-  const teamSummaryPrompt = `\n以下の過去1週間分の${groupName}チーム日報データから、チーム全体のコンディションの傾向、共通して報告された課題、ポジティブな動きについて分析し、簡潔なサマリーレポートを生成してください。\n物語形式で、マネージャーがチームの「空気感」を把握しやすいように記述してください。具体的な社員名は匿名化してください。\n\n**チーム日報データ概要（過去1週間）：**\n- 総日報数: ${summaryData.totalReports}件\n- 気分報告の傾向: ${moodSummary}\n- 共通の課題: ${problemsSummary}\n- ポジティブな動き: ${positivesSummary}\n\nレポートは、以下の構成で記述してください。\n[hr]\n▼ 今週の${groupName}チームコンディションサマリー\n[サマリー本文]\n[hr]\n`;
+  const teamSummaryPrompt = `
+以下の過去1週間分の${groupName}チーム日報データから、チーム全体のコンディションの傾向、共通して報告された課題、ポジティブな動きについて分析し、簡潔なサマリーレポートを生成してください。
+物語形式で、マネージャーがチームの「空気感」を把握しやすいように記述してください。具体的な社員名は匿名化してください。
+
+**チーム日報データ概要（過去1週間）：**
+- 総日報数: ${summaryData.totalReports}件
+- 気分報告の傾向: ${moodSummary}
+- 共通の課題: ${problemsSummary}
+- ポジティブな動き: ${positivesSummary}
+
+**【重要】ネガティブな傾向の強調**: もし「少し悪い」または「悪い」の気分報告や、具体的な「困っていること」が複数回報告されている場合は、その傾向と潜在的な影響について、レポート内で明確に言及してください。チーム全体の「空気感」を伝える上で、これらのネガティブな側面も適切に含めてください。
+
+レポートは、以下の構成で記述してください。
+[hr]
+▼ 今週の${groupName}チームコンディションサマリー
+[サマリー本文]
+[hr]
+`;
 
   try {
     Logger.log('Gemini APIにサマリー生成をリクエストします。');
