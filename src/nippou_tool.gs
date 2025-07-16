@@ -24,7 +24,7 @@ const CONFIG = {
   CHATWORK_ROLE_EMPLOYEE: 'employee',
 
   // Chatwork設定シートのヘッダー名
-  CHATWORK_SETTINGS_HEADERS: ['グループ名', '氏名', 'ルームID', '役割'],
+  CHATWORK_SETTINGS_HEADERS: ['グループ名', '氏名', 'ルームID', '役割', '週次レポートモード'],
 
   // 日報ログシートのヘッダー名
   DAILY_REPORT_LOG_HEADERS: ['タイムスタンプ', '氏名', 'マネージャー', '日報日付', '今日の業務内容', '今日の気分', '困っていること', 'AI評価状態', 'AI評価理由'],
@@ -65,7 +65,7 @@ function onOpen() {
     .addItem('日報質問送信（Chatwork）', 'sendDailyReportQuestions')
     .addItem('Chatwork日報取得・分析', 'processChatworkReplies')
     .addSeparator()
-    .addItem('週次チームサマリー生成', 'generateWeeklyTeamSummary')
+    .addItem('週次レポート生成', 'generateWeeklyReports')
     .addSeparator()
     .addItem('定期実行トリガーを設定', 'createDailyTriggers')
     .addItem('全てのトリガーを削除', 'deleteTriggers')
@@ -125,13 +125,13 @@ function createDailyTriggers() {
     .create();
   Logger.log(`Chatwork日報取得・分析トリガーを毎日 ${replyHour}時${replyMinute}分頃に設定しました。`);
 
-  ScriptApp.newTrigger('generateWeeklyTeamSummary')
+  ScriptApp.newTrigger('generateWeeklyReports')
     .timeBased()
     .everyWeeks(1)
     .onWeekDay(ScriptApp.WeekDay.MONDAY)
     .atHour(10)
     .create();
-  Logger.log(`週次チームコンディションサマリー生成トリガーを毎週月曜日10時に設定しました。`);
+  Logger.log(`週次レポート生成トリガーを毎週月曜日10時に設定しました。`);
 
   ScriptApp.newTrigger('cleanUpBotQuestionLog')
     .timeBased()
@@ -141,7 +141,7 @@ function createDailyTriggers() {
     .create();
   Logger.log(`BOT質問ログクリーンアップトリガーを毎週月曜日深夜2時に設定しました。`);
 
-  SpreadsheetApp.getUi().alert('定期実行トリガーを設定しました。 質問送信: 毎日' + `${questionHour}時${questionMinute}分頃` + ' 返信収集: 毎日' + `${replyHour}時${replyMinute}分頃` + ' 週次サマリー: 毎週月曜日10時' + ' ログクリーンアップ: 毎週月曜日深夜');
+  SpreadsheetApp.getUi().alert('定期実行トリガーを設定しました。 質問送信: 毎日' + `${questionHour}時${questionMinute}分頃` + ' 返信収集: 毎日' + `${replyHour}時${replyMinute}分頃` + ' 週次レポート: 毎週月曜日10時' + ' ログクリーンアップ: 毎週月曜日深夜');
 }
 
 /**
@@ -203,7 +203,7 @@ function getChatworkApiKey() {
 
 /**
  * 「Chatwork設定」シートから全社員の情報をフラットな配列として取得する。
- * @returns {Array<{employeeName: string, employeeRoomId: string, managerName: string, managerRoomId: string}>}
+ * @returns {Array<{employeeName: string, employeeRoomId: string, managerName: string, managerRoomId: string, weeklyReportMode: string, group: string, role: string}>}
  */
 function getChatworkTargetRoomIds() {
   const sheetName = CONFIG.CHATWORK_SETTINGS_SHEET_NAME;
@@ -214,7 +214,12 @@ function getChatworkTargetRoomIds() {
   }
 
   const data = sheet.getDataRange().getValues();
-  const header = data.shift(); // ヘッダー行を除去
+  if (data.length < 1) {
+    Logger.log(`エラー: シート「${sheetName}」にデータがありません。`);
+    return [];
+  }
+
+  const header = data[0];
   const headerMap = header.reduce((acc, col, index) => ({ ...acc, [col]: index }), {});
 
   const requiredColumns = CONFIG.CHATWORK_SETTINGS_HEADERS;
@@ -225,39 +230,56 @@ function getChatworkTargetRoomIds() {
     }
   }
 
-  const managers = {};
-  const employees = [];
+  const managers = {}; // グループごとのマネージャー情報と週次レポートモード
+  const allEmployees = []; // 全社員のリスト
 
-  data.forEach(row => {
-    const group = row[headerMap[CONFIG.CHATWORK_SETTINGS_HEADERS[0]]];
-    const name = row[headerMap[CONFIG.CHATWORK_SETTINGS_HEADERS[1]]];
-    const roomId = row[headerMap[CONFIG.CHATWORK_SETTINGS_HEADERS[2]]].toString();
-    const role = row[headerMap[CONFIG.CHATWORK_SETTINGS_HEADERS[3]]];
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const group = row[headerMap['グループ名']];
+    const name = row[headerMap['氏名']];
+    const roomId = row[headerMap['ルームID']] ? row[headerMap['ルームID']].toString() : '';
+    const role = row[headerMap['役割']] ? row[headerMap['役割']].toLowerCase() : '';
+    const weeklyReportMode = row[headerMap['週次レポートモード']] ? row[headerMap['週次レポートモード']].toLowerCase() : 'individual'; // デフォルトは'individual'
 
-    if (!group || !name || !roomId || !role) return; // 空の行はスキップ
-
-    if (role.toLowerCase() === CONFIG.CHATWORK_ROLE_MANAGER) {
-      managers[group] = { name, roomId };
-    } else if (role.toLowerCase() === CONFIG.CHATWORK_ROLE_EMPLOYEE) {
-      employees.push({ group, name, roomId });
+    if (!group || !name || !roomId || !role) {
+      Logger.log(`警告: シート「${sheetName}」の${i + 1}行目に不足データがあります。スキップします。`);
+      continue; // 空の行や不完全な行はスキップ
     }
-  });
 
-  const flatEmployeeList = employees.map(emp => {
-    const manager = managers[emp.group];
+    if (role === CONFIG.CHATWORK_ROLE_MANAGER) {
+      managers[group] = { name, roomId, weeklyReportMode };
+    }
+  }
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const group = row[headerMap['グループ名']];
+    const name = row[headerMap['氏名']];
+    const roomId = row[headerMap['ルームID']] ? row[headerMap['ルームID']].toString() : '';
+    const role = row[headerMap['役割']] ? row[headerMap['役割']].toLowerCase() : '';
+
+    if (!group || !name || !roomId || !role) {
+      continue; // 空の行や不完全な行はスキップ（上記でログ済み）
+    }
+
+    const manager = managers[group];
     if (!manager) {
-      Logger.log(`警告: 社員「${emp.name}」のグループ「${emp.group}」に対応するマネージャーが見つかりません。`);
-      return null;
+      Logger.log(`警告: 社員「${name}」のグループ「${group}」に対応するマネージャーが見つかりません。この社員はリストに含まれません。`);
+      continue;
     }
-    return {
-      employeeName: emp.name,
-      employeeRoomId: emp.roomId,
-      managerName: manager.name,
-      managerRoomId: manager.roomId
-    };
-  }).filter(Boolean); // nullを除外
 
-  return flatEmployeeList;
+    allEmployees.push({
+      employeeName: name,
+      employeeRoomId: roomId,
+      managerName: manager.name,
+      managerRoomId: manager.roomId,
+      weeklyReportMode: manager.weeklyReportMode,
+      group: group,
+      role: role
+    });
+  }
+
+  return allEmployees;
 }
 
 /**
@@ -475,8 +497,8 @@ function logReportToSheet(reportData, status, reason, managerName) {
   }
   sheet.appendRow([
     new Date(),           // タイムスタンプ
-    managerName || 'N/A', // マネージャー名
     reportData.name,      // 氏名
+    managerName || 'N/A', // マネージャー名
     reportData.date,      // 日報日付
     reportData.workContent,
     reportData.mood,
@@ -753,13 +775,13 @@ function getDailyReportDataForEmployee(employeeName) {
   let quantitativeSummary = '気分推移: ';
   quantitativeSummary += Object.entries(moodCounts)
     .filter(([, count]) => count > 0)
-    .map(([mood, count]) => `${mood}(${count}回)`)
+    .map(([mood, count]) => `${mood}(${count}回)`) 
     .join(', ');
 
   const frequentProblemsList = Object.entries(problemKeywords)
     .filter(([, count]) => count > 0)
     .sort((a, b) => b[1] - a[1])
-    .map(([keyword, count]) => `${keyword}(${count}回)`)
+    .map(([keyword, count]) => `${keyword}(${count}回)`) 
     .join(', ');
   if (frequentProblemsList) {
     quantitativeSummary += `\n繰り返し課題: ${frequentProblemsList}`;
@@ -1070,105 +1092,178 @@ function generate1on1Topics() {
   }
 }
 
-// --- 週次チームコンディションサマリー機能 ---
+// --- 週次レポート生成機能 ---
 
 /**
- * 週次チームコンディションサマリーを生成し、マネージャーに通知する。
+ * 週次レポートを生成し、マネージャーに通知する。
  * 毎週月曜日の朝に実行されることを想定。
  */
-function generateWeeklyTeamSummary() {
+function generateWeeklyReports() {
   const ui = SpreadsheetApp.getUi();
-  Logger.log('週次チームコンディションサマリーの生成を開始します。');
+  Logger.log('週次レポートの生成を開始します。');
 
   try {
-    // 1. 日報ログデータの取得と集計
-    const summaryData = getWeeklyTeamReportSummary();
-    if (!summaryData) {
-      Logger.log('サマリーデータがありません。処理を終了します。');
-      return;
-    }
+    const employeeList = getChatworkTargetRoomIds();
+    const managersToProcess = {}; // Key: managerRoomId, Value: { managerName, managerRoomId, weeklyReportMode, groupName, employees: [] }
 
-    // 2. Gemini APIによるサマリー生成
-    const teamSummaryReport = generateTeamSummaryReportWithGemini(summaryData);
+    // マネージャーごとに社員をグループ化
+    employeeList.forEach(employee => {
+      const { employeeName, employeeRoomId, managerName, managerRoomId, weeklyReportMode, group, role } = employee;
 
-    // 3. マネージャーへのChatwork通知
-    const managers = getManagersFromChatworkSettings();
-    if (managers.length === 0) {
-      Logger.log('通知対象のマネージャーが見つかりません。');
-      ui.alert('エラー', '通知対象のマネージャーが「Chatwork設定」シートに見つかりません。', ui.ButtonSet.OK);
-      return;
-    }
-    
-    const today = new Date();
-    const subject = `【週次チームコンディションサマリー】${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}週`;
-
-    managers.forEach(manager => {
-      try {
-        sendChatworkNotification(manager.roomId, `${subject}\n\n${teamSummaryReport}`);
-        Logger.log(`マネージャー「${manager.name}」さんへ週次サマリーを通知しました。`);
-      } catch (e) {
-        Logger.log(`マネージャー「${manager.name}」さんへの通知に失敗しました: ${e.message}`);
+      if (!managerRoomId) {
+        Logger.log(`社員「${employeeName}」のマネージャーのChatworkルームIDが不明なため、処理をスキップします。`);
+        return;
       }
+
+      if (!managersToProcess[managerRoomId]) {
+        managersToProcess[managerRoomId] = {
+          name: managerName,
+          roomId: managerRoomId,
+          weeklyReportMode: weeklyReportMode,
+          groupName: group,
+          employees: []
+        };
+      }
+      managersToProcess[managerRoomId].employees.push({ employeeName, employeeRoomId, role });
     });
 
-    Logger.log('週次チームコンディションサマリーの生成と通知が正常に完了しました。');
+    // 各マネージャー/グループに対してレポートを生成
+    for (const managerRoomId in managersToProcess) {
+      const managerData = managersToProcess[managerRoomId];
+      const today = new Date();
+      const subjectDate = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}週`;
+
+      if (managerData.weeklyReportMode === 'individual') {
+        // Individual report mode (週次メンバーコンディションレポート)
+        Logger.log(`マネージャー「${managerData.name}」さん向けに個別週次レポートを生成します。`);
+        let combinedReportBody = '';
+        let hasReports = false;
+
+        managerData.employees.forEach(employee => {
+          // マネージャー自身はレポート対象外
+          if (employee.role === CONFIG.CHATWORK_ROLE_EMPLOYEE) {
+            const rawReports = getWeeklyRawReports(employee.employeeName); // 既存関数
+            if (rawReports.length > 0) {
+              combinedReportBody += `[hr]\n▼ ${employee.employeeName}さんの週次日報\n`;
+              rawReports.forEach(report => {
+                combinedReportBody += `  ・日付: ${report.date}\n`;
+                combinedReportBody += `    業務内容: ${truncateText(report.workContent, 50)}\n`;
+                combinedReportBody += `    気分: ${report.mood}\n`;
+                combinedReportBody += `    困っていること: ${truncateText(report.problems, 50)}\n`;
+                if (report.aiStatus && report.aiStatus !== '不明') {
+                  combinedReportBody += `    AI評価: ${report.aiStatus} (${report.aiReason})\n`;
+                }
+              });
+              combinedReportBody += '\n';
+              hasReports = true;
+            } else {
+              Logger.log(`社員「${employee.employeeName}」の過去1週間の日報データが見つかりませんでした。`);
+            }
+          }
+        });
+
+        if (hasReports) {
+          const subject = `【週次メンバーコンディションレポート】${managerData.name}さん向け - ${subjectDate}`;
+          sendChatworkNotification(managerData.roomId, `${subject}\n\n${combinedReportBody.trim()}`);
+          Logger.log(`マネージャー「${managerData.name}」さんへ週次メンバーコンディションレポートを通知しました。`);
+        } else {
+          Logger.log(`マネージャー「${managerData.name}」さん向けの週次メンバーコンディションレポートは生成されませんでした（対象社員の日報データなし）。`);
+        }
+
+      } else if (managerData.weeklyReportMode === 'team') {
+        // Team summary mode (週次チームコンディションサマリー)
+        Logger.log(`グループ「${managerData.groupName}」向けに週次チームコンディションサマリーを生成します。`);
+        const teamEmployees = managerData.employees.filter(emp => emp.role === CONFIG.CHATWORK_ROLE_EMPLOYEE);
+        if (teamEmployees.length > 0) {
+          const summaryData = getWeeklyTeamReportSummaryForGroup(teamEmployees.map(e => e.employeeName)); // 新規関数
+          if (summaryData) {
+            const teamSummaryReport = generateTeamSummaryReportWithGemini(summaryData, managerData.groupName); // 既存関数にgroupNameを渡す
+            const subject = `【週次チームコンディションサマリー】${managerData.groupName} - ${subjectDate}`;
+            sendChatworkNotification(managerData.roomId, `${subject}\n\n${teamSummaryReport}`);
+            Logger.log(`マネージャー「${managerData.name}」さんへグループ「${managerData.groupName}」の週次チームコンディションサマリーを通知しました。`);
+          } else {
+            Logger.log(`グループ「${managerData.groupName}」の過去1週間の日報データが見つかりませんでした。`);
+          }
+        } else {
+          Logger.log(`グループ「${managerData.groupName}」にレポート対象の社員が見つかりませんでした。`);
+        }
+      }
+    }
+
+    Logger.log('週次レポートの生成と通知が正常に完了しました。');
     // 手動実行時のみアラート
-    if (typeof ScriptApp === 'undefined' || !ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'generateWeeklyTeamSummary')) {
-       ui.alert('完了', '週次チームコンディションサマリーの生成と通知が完了しました。', ui.ButtonSet.OK);
+    if (typeof ScriptApp === 'undefined' || !ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'generateWeeklyReports')) {
+       ui.alert('完了', '週次レポートの生成と通知が完了しました。', ui.ButtonSet.OK);
     }
 
   } catch (e) {
-    Logger.log(`週次チームコンディションサマリー生成中にエラーが発生しました: ${e.message}`);
+    Logger.log(`週次レポート生成中にエラーが発生しました: ${e.message}`);
     // 手動実行時のみアラート
-     if (typeof ScriptApp === 'undefined' || !ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'generateWeeklyTeamSummary')) {
+     if (typeof ScriptApp === 'undefined' || !ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'generateWeeklyReports')) {
        ui.alert('エラー', `処理中にエラーが発生しました: ${e.message}`, ui.ButtonSet.OK);
     }
   }
 }
 
 /**
- * 「Chatwork設定」シートからマネージャーの情報を取得する。
- * @returns {Array<{name: string, roomId: string}>}
+ * 指定された社員の過去1週間分の日報ログの生データを取得する。
+ * @param {string} employeeName 対象社員名
+ * @returns {Array<Object>} 過去1週間分の日報データ（オブジェクトの配列）
  */
-function getManagersFromChatworkSettings() {
-  const sheetName = CONFIG.CHATWORK_SETTINGS_SHEET_NAME;
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+function getWeeklyRawReports(employeeName) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DAILY_REPORT_LOG_SHEET_NAME);
   if (!sheet) {
-    Logger.log(`エラー: シート「${sheetName}」が見つかりません。`);
+    Logger.log(`シート「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」が見つかりません。`);
     return [];
   }
 
-  const data = sheet.getDataRange().getValues();
-  const header = data.shift();
-  const headerMap = header.reduce((acc, col, index) => ({ ...acc, [col]: index }), {});
-
-  const requiredColumns = [CONFIG.CHATWORK_SETTINGS_HEADERS[1], CONFIG.CHATWORK_SETTINGS_HEADERS[2], CONFIG.CHATWORK_SETTINGS_HEADERS[3]]; //氏名, ルームID, 役割
-  for (const col of requiredColumns) {
-    if (headerMap[col] === undefined) {
-      Logger.log(`エラー: シート「${sheetName}」に必要な列「${col}」がありません。`);
-      return [];
-    }
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) {
+    return [];
   }
 
-  const managers = data.map(row => {
-    const name = row[headerMap[CONFIG.CHATWORK_SETTINGS_HEADERS[1]]];
-    const roomId = row[headerMap[CONFIG.CHATWORK_SETTINGS_HEADERS[2]]].toString();
-    const role = row[headerMap[CONFIG.CHATWORK_SETTINGS_HEADERS[3]]];
-    if (role && role.toLowerCase() === CONFIG.CHATWORK_ROLE_MANAGER) {
-      return { name, roomId };
-    }
-    return null;
-  }).filter(Boolean);
+  const header = values[0];
+  const dataRows = values.slice(1);
+  const headerMap = header.reduce((acc, col, index) => ({ ...acc, [col]: index }), {});
 
-  return managers;
+  const nameCol = headerMap['氏名'];
+  const dateCol = headerMap['タイムスタンプ']; // Use timestamp for filtering
+  const moodCol = headerMap['今日の気分'];
+  const problemsCol = headerMap['困っていること'];
+  const workContentCol = headerMap['今日の業務内容'];
+  const aiStatusCol = headerMap['AI評価状態'];
+  const aiReasonCol = headerMap['AI評価理由'];
+
+  if (nameCol === undefined || dateCol === undefined || moodCol === undefined || problemsCol === undefined || workContentCol === undefined || aiStatusCol === undefined || aiReasonCol === undefined) {
+    Logger.log('日報ログシートのヘッダーが不正です。必要な列が見つかりません。');
+    return [];
+  }
+
+  const oneWeekAgo = new Date();
+  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+  const employeeWeeklyReports = dataRows.filter(row => {
+    const reportName = row[nameCol] ? row[nameCol].toString().trim() : '';
+    const reportDate = row[dateCol] ? new Date(row[dateCol]) : null;
+    return reportName.toLowerCase() === employeeName.toLowerCase() && reportDate && reportDate >= oneWeekAgo;
+  }).map(row => ({
+    date: row[dateCol] ? new Date(row[dateCol]).toLocaleDateString('ja-JP') : 'N/A',
+    workContent: row[workContentCol] ? row[workContentCol].toString().trim() : 'N/A',
+    mood: row[moodCol] ? row[moodCol].toString().trim() : 'N/A',
+    problems: row[problemsCol] ? row[problemsCol].toString().trim() : 'N/A',
+    aiStatus: row[aiStatusCol] ? row[aiStatusCol].toString().trim() : 'N/A',
+    aiReason: row[aiReasonCol] ? row[aiReasonCol].toString().trim() : 'N/A'
+  }));
+
+  return employeeWeeklyReports;
 }
 
-
 /**
- * 過去1週間分の日報ログを集計・分析する
+ * 指定された社員リストの過去1週間分の日報ログを集計・分析する
+ * @param {Array<string>} employeeNames 対象社員名の配列
  * @returns {Object|null} 集計データ
  */
-function getWeeklyTeamReportSummary() {
+function getWeeklyTeamReportSummaryForGroup(employeeNames) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DAILY_REPORT_LOG_SHEET_NAME);
   if (!sheet) {
     Logger.log(`シート「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」が見つかりません。`);
@@ -1185,12 +1280,13 @@ function getWeeklyTeamReportSummary() {
   const dataRows = values.slice(1);
   const headerMap = header.reduce((acc, col, index) => ({ ...acc, [col]: index }), {});
 
-  const dateCol = headerMap['タイムスタンプ'];
+  const nameCol = headerMap['氏名'];
+  const dateCol = headerMap['タイムスタンプ']; // Use timestamp for filtering
   const moodCol = headerMap['今日の気分'];
   const problemsCol = headerMap['困っていること'];
   const workContentCol = headerMap['今日の業務内容'];
 
-  if (dateCol === undefined || moodCol === undefined || problemsCol === undefined || workContentCol === undefined) {
+  if (nameCol === undefined || dateCol === undefined || moodCol === undefined || problemsCol === undefined || workContentCol === undefined) {
     Logger.log('日報ログシートのヘッダーが不正です。必要な列が見つかりません。');
     return null;
   }
@@ -1199,8 +1295,9 @@ function getWeeklyTeamReportSummary() {
   oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
   const weeklyReports = dataRows.filter(row => {
-    const reportDate = new Date(row[dateCol]);
-    return reportDate >= oneWeekAgo;
+    const reportName = row[nameCol] ? row[nameCol].toString().trim() : '';
+    const reportDate = row[dateCol] ? new Date(row[dateCol]) : null;
+    return employeeNames.includes(reportName) && reportDate && reportDate >= oneWeekAgo;
   });
 
   if (weeklyReports.length === 0) {
@@ -1220,13 +1317,11 @@ function getWeeklyTeamReportSummary() {
     // 課題キーワード集計
     const problems = report[problemsCol] ? report[problemsCol].toString().trim() : '';
     if (problems && problems !== '特になし') {
-        // 簡単なキーワード抽出（スペースや読点で分割）
-        const keywords = problems.split(/[\s、,\u3000]+/);
-        keywords.forEach(kw => {
-            if(kw.length > 1) { // 1文字の単語は除外
-               problemKeywords[kw] = (problemKeywords[kw] || 0) + 1;
+        for (const keyword of CONFIG.PROBLEM_KEYWORDS) {
+            if (problems.includes(keyword)) {
+                problemKeywords[keyword] = (problemKeywords[keyword] || 0) + 1;
             }
-        });
+        }
     }
 
     // ポジティブな動き
@@ -1238,12 +1333,11 @@ function getWeeklyTeamReportSummary() {
       if (workContent.includes('改善') || workContent.includes('効率化')) positiveKeywords.add('業務改善/効率化');
     }
   });
-  
-  // 頻出する課題キーワードを抽出
+
   const commonProblems = Object.entries(problemKeywords)
-    .filter(([, count]) => count > 1) // 複数回出現したもの
+    .filter(([, count]) => count > 1)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 5) // 上位5件
+    .slice(0, 5)
     .map(([keyword]) => keyword);
 
   return {
@@ -1257,14 +1351,15 @@ function getWeeklyTeamReportSummary() {
 /**
  * 集計データからGeminiプロンプトを生成し、APIを呼び出してサマリーレポートを取得する
  * @param {Object} summaryData 
+ * @param {string} groupName
  * @returns {string} Geminiが生成したサマリーレポート
  */
-function generateTeamSummaryReportWithGemini(summaryData) {
+function generateTeamSummaryReportWithGemini(summaryData, groupName) {
   const moodSummary = Object.entries(summaryData.moodCounts).map(([mood, count]) => `${mood}(${count}回)`).join(', ');
   const problemsSummary = summaryData.commonProblems.length > 0 ? summaryData.commonProblems.join(', ') : '特筆すべき共通課題は報告されていません。';
   const positivesSummary = summaryData.positiveTrends.length > 0 ? summaryData.positiveTrends.join(', ') : '特筆すべきポジティブな動きは報告されていません。';
 
-  const teamSummaryPrompt = `\n以下の過去1週間分のチーム日報データから、チーム全体のコンディションの傾向、共通して報告された課題、ポジティブな動きについて分析し、簡潔なサマリーレポートを生成してください。\n物語形式で、マネージャーがチームの「空気感」を把握しやすいように記述してください。具体的な社員名は匿名化してください。\n\n**チーム日報データ概要（過去1週間）：**\n- 総日報数: ${summaryData.totalReports}件\n- 気分報告の傾向: ${moodSummary}\n- 共通の課題: ${problemsSummary}\n- ポジティブな動き: ${positivesSummary}\n\nレポートは、以下の構成で記述してください。\n[hr]\n▼ 今週のチームコンディションサマリー\n[サマリー本文]\n[hr]\n`;
+  const teamSummaryPrompt = `\n以下の過去1週間分の${groupName}チーム日報データから、チーム全体のコンディションの傾向、共通して報告された課題、ポジティブな動きについて分析し、簡潔なサマリーレポートを生成してください。\n物語形式で、マネージャーがチームの「空気感」を把握しやすいように記述してください。具体的な社員名は匿名化してください。\n\n**チーム日報データ概要（過去1週間）：**\n- 総日報数: ${summaryData.totalReports}件\n- 気分報告の傾向: ${moodSummary}\n- 共通の課題: ${problemsSummary}\n- ポジティブな動き: ${positivesSummary}\n\nレポートは、以下の構成で記述してください。\n[hr]\n▼ 今週の${groupName}チームコンディションサマリー\n[サマリー本文]\n[hr]\n`;
 
   try {
     Logger.log('Gemini APIにサマリー生成をリクエストします。');
