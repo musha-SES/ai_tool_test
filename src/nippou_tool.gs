@@ -512,7 +512,7 @@ function logReportToSheet(reportData, status, reason, managerName) {
 /**
  * Chatworkにメッセージを送信する汎用関数。
  */
-function sendChatworkNotification(roomId, message) {
+function sendChatworkNotification(roomId, message, subject = null) {
   try {
     const apiKey = getChatworkApiKey();
     const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
@@ -523,7 +523,10 @@ function sendChatworkNotification(roomId, message) {
     // 2. Chatwork記法で使われる角括弧 [], スラッシュ / のみデコードして戻す
     encodedMessage = encodedMessage.replace(/%5B/g, '[').replace(/%5D/g, ']').replace(/%2F/g, '/');
 
-    const payloadString = `body=${encodedMessage}&self_unread=1`;
+    let payloadString = `body=${encodedMessage}&self_unread=1`;
+    if (subject) {
+      payloadString += `&subject=${encodeURIComponent(subject)}`;
+    }
 
     const options = {
       method: 'post',
@@ -1136,38 +1139,37 @@ function generateWeeklyReports() {
       if (managerData.weeklyReportMode === 'individual') {
         // Individual report mode (週次メンバーコンディションレポート)
         Logger.log(`マネージャー「${managerData.name}」さん向けに個別週次レポートを生成します。`);
-        let combinedReportBody = '';
-        let hasReports = false;
+        const allIndividualReportsForManager = [];
 
         managerData.employees.forEach(employee => {
-          // マネージャー自身はレポート対象外
           if (employee.role === CONFIG.CHATWORK_ROLE_EMPLOYEE) {
-            const rawReports = getWeeklyRawReports(employee.employeeName); // 既存関数
+            const rawReports = getWeeklyRawReports(employee.employeeName);
             if (rawReports.length > 0) {
-              combinedReportBody += `[hr]\n▼ ${employee.employeeName}さんの週次日報\n`;
-              rawReports.forEach(report => {
-                combinedReportBody += `  ・日付: ${report.date}\n`;
-                combinedReportBody += `    業務内容: ${truncateText(report.workContent, 50)}\n`;
-                combinedReportBody += `    気分: ${report.mood}\n`;
-                combinedReportBody += `    困っていること: ${truncateText(report.problems, 50)}\n`;
-                if (report.aiStatus && report.aiStatus !== '不明') {
-                  combinedReportBody += `    AI評価: ${report.aiStatus} (${report.aiReason})\n`;
-                }
-              });
-              combinedReportBody += '\n';
-              hasReports = true;
+              try {
+                const { reportText, subject } = generateIndividualReportWithGemini(rawReports, employee.employeeName);
+                allIndividualReportsForManager.push({ reportText, subject });
+              } catch (e) {
+                Logger.log(`「${employee.employeeName}」さんの個別レポート生成中にエラーが発生しました: ${e.message}`);
+              }
             } else {
               Logger.log(`社員「${employee.employeeName}」の過去1週間の日報データが見つかりませんでした。`);
             }
           }
         });
 
-        if (hasReports) {
+        if (allIndividualReportsForManager.length > 0) {
+          let combinedReportBody = '';
+          allIndividualReportsForManager.forEach((report, index) => {
+            combinedReportBody += report.reportText;
+            if (index < allIndividualReportsForManager.length - 1) {
+              combinedReportBody += '\n[hr]\n';
+            }
+          });
+
           const subject = `【週次メンバーコンディションレポート】${managerData.name}さん向け - ${subjectDate}`;
-          sendChatworkNotification(managerData.roomId, `${subject}\n\n${combinedReportBody.trim()}`);
+          const finalCombinedReportBody = `${subject}\n[hr]\n\n▼ 各メンバーのコンディションサマリー\n\n${combinedReportBody}\n\n詳細については、日報ログスプレッドシートをご確認ください。`;
+          sendChatworkNotification(managerData.roomId, finalCombinedReportBody);
           Logger.log(`マネージャー「${managerData.name}」さんへ週次メンバーコンディションレポートを通知しました。`);
-        } else {
-          Logger.log(`マネージャー「${managerData.name}」さん向けの週次メンバーコンディションレポートは生成されませんでした（対象社員の日報データなし）。`);
         }
 
       } else if (managerData.weeklyReportMode === 'team') {
@@ -1175,18 +1177,18 @@ function generateWeeklyReports() {
         Logger.log(`グループ「${managerData.groupName}」向けに週次チームコンディションサマリーを生成します。`);
         const teamEmployees = managerData.employees.filter(emp => emp.role === CONFIG.CHATWORK_ROLE_EMPLOYEE);
         if (teamEmployees.length > 0) {
-          const summaryData = getWeeklyTeamReportSummaryForGroup(teamEmployees.map(e => e.employeeName)); // 新規関数
+          const summaryData = getWeeklyTeamReportSummaryForGroup(teamEmployees.map(e => e.employeeName));
           if (summaryData) {
-            const teamSummaryReport = generateTeamSummaryReportWithGemini(summaryData, managerData.groupName); // 既存関数にgroupNameを渡す
+            const teamSummaryReport = generateTeamSummaryReportWithGemini(summaryData, managerData.groupName);
             const subject = `【週次チームコンディションサマリー】${managerData.groupName} - ${subjectDate}`;
             sendChatworkNotification(managerData.roomId, `${subject}\n\n${teamSummaryReport}`);
             Logger.log(`マネージャー「${managerData.name}」さんへグループ「${managerData.groupName}」の週次チームコンディションサマリーを通知しました。`);
           } else {
             Logger.log(`グループ「${managerData.groupName}」の過去1週間の日報データが見つかりませんでした。`);
           }
-        } else {
-          Logger.log(`グループ「${managerData.groupName}」にレポート対象の社員が見つかりませんでした。`);
         }
+      } else {
+        Logger.log(`グループ「${managerData.groupName}」にレポート対象の社員が見つかりませんでした。`);
       }
     }
 
@@ -1346,6 +1348,38 @@ function getWeeklyTeamReportSummaryForGroup(employeeNames) {
     commonProblems: commonProblems,
     positiveTrends: Array.from(positiveKeywords)
   };
+}
+
+/**
+ * 個別の日報データからGeminiプロンプトを生成し、APIを呼び出してコンディションレポートを取得する
+ * @param {Array<Object>} rawReports 対象メンバーの過去1週間分の日報データ
+ * @param {string} employeeName 対象メンバー名
+ * @returns {{reportText: string, subject: string}} Geminiが生成したコンディションレポートと件名
+ */
+function generateIndividualReportWithGemini(rawReports, employeeName) {
+  const reportEntries = rawReports.map(r => 
+    `日付: ${r.date}, 業務内容: ${r.workContent}, 気分: ${r.mood}, 困り事: ${r.problems}, AI評価: ${r.aiStatus || 'N/A'}`
+  ).join('\n');
+
+  const anonymousName = employeeName; // 匿名化する場合はここで処理
+
+  const individualReportPrompt = `以下の${anonymousName}さんの過去1週間分の日報データから、このメンバーのコンディションの傾向、個人的な課題、ポジティブな動きについて分析し、簡潔なレポートを生成してください。マネージャーが週ごとの傾向を**一目で把握できるよう、以下のフォーマットに厳密に従って**記述してください。\n\n**過去1週間分の${anonymousName}さんの日報データ：**\n${reportEntries}\n\n---\n\n**【重要】回答フォーマットの厳守**\n以下のフォーマットに厳密に従って、レポートを記述してください。Markdown記号（例: **、*）やChatwork記法（例: [info]、[ul]、[li]）は一切使用しないでください。「- 」や「1. 」などの手動の箇条書き記号は使用可能です。各項目は簡潔に記述し、全体で最大150文字程度に収めてください。\n\n▼ 今週の${anonymousName}さんのコンディションサマリー\n- コンディション概要: [今週の気分傾向とAI評価の総合的な要約。例: 概ね良好、週後半にやや疲労感あり]\n- 主な課題: [報告された困りごとや課題の要約。例: テスト環境構築の遅延、顧客要望の整理に苦戦]\n- ポジティブな点: [業務内容や気分から見られる良い点、成果の要約。例: 新機能リリース貢献、チーム内協力推進]\n- 特記事項: [懸念すべき点や特に注目すべき変化があれば簡潔に。例: 〇〇に関する残業が〇回発生]\n\n`;
+
+  try {
+    Logger.log(`Gemini APIに${employeeName}さんの個別レポート生成をリクエストします。`);
+    const geminiResponse = callGeminiApi(individualReportPrompt);
+    const reportText = geminiResponse.candidates[0].content.parts[0].text;
+    Logger.log(`Gemini APIから${employeeName}さんの個別レポートを取得しました。`);
+
+    const today = new Date();
+    const subjectDate = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}週`;
+    const subject = `【週次メンバーコンディションレポート】${anonymousName} - ${subjectDate}`;
+
+    return { reportText, subject }; // Return an object
+  } catch (e) {
+    Logger.log(`${employeeName}さんの個別レポート生成中にGemini API呼び出しでエラーが発生しました: ${e.message}`);
+    throw new Error('Gemini APIからの個別レポート生成に失敗しました。');
+  }
 }
 
 /**
