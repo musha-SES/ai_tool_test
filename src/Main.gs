@@ -1007,7 +1007,7 @@ function generate1on1Topics() {
   if (selfEvalData['目標グレード']) promptSelfEvalData += `目標グレード: ${selfEvalData['目標グレード']}\n`;
 
   const geminiPrompt = CONFIG.ONE_ON_ONE_PROMPT_TEMPLATE
-    .replace('{anonymousName}', CONFIG.ANONYMOUS_EMPLOYEE_NAME)
+    .replace(/{anonymousName}/g, targetEmployeeName)
     .replace('{dailyReportSummary}', dailyReportSummary)
     .replace('{promptSelfEvalData}', promptSelfEvalData);
 
@@ -1327,10 +1327,8 @@ function generateIndividualReportWithGemini(rawReports, employeeName) {
     `日付: ${r.date}, 業務内容: ${r.workContent}, 気分: ${r.mood}, 困り事: ${r.problems}, AI評価: ${r.aiStatus || CONFIG.DEFAULT_VALUES.NOT_APPLICABLE}`
   ).join('\n');
 
-  const anonymousName = CONFIG.ANONYMOUS_EMPLOYEE_NAME_SHORT;
-
   const individualReportPrompt = CONFIG.INDIVIDUAL_REPORT_PROMPT_TEMPLATE
-    .replace(/{anonymousName}/g, anonymousName)
+    .replace(/{anonymousName}/g, employeeName)
     .replace('{reportEntries}', reportEntries);
 
   try {
