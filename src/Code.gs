@@ -1,61 +1,3 @@
-const CONFIG = {
-  // シート名
-  BOT_QUESTION_LOG_SHEET_NAME: 'BOT質問ログ',
-  DAILY_REPORT_LOG_SHEET_NAME: '日報ログ',
-  CHATWORK_SETTINGS_SHEET_NAME: 'Chatwork設定',
-
-  // 日報データ取得範囲
-  DAILY_REPORT_LOG_FETCH_DAYS: 365,
-
-  // truncateTextの最大長
-  TRUNCATE_TEXT_MAX_LENGTH: 100,
-
-  // validateDailyReportの気分選択肢
-  MOOD_OPTIONS: ['良い', '普通', '少し悪い', '悪い'],
-
-  // getDailyReportDataForEmployee内の問題キーワード
-  PROBLEM_KEYWORDS: ['疲労', '残業', '人間関係', '遅延', 'プレッシャー', 'モチベーション', 'コミュニケーション', 'スキル', '不明点', '認識齟齬'],
-
-  // getDailyReportDataForEmployee内の代表日報抜粋数
-  REPRESENTATIVE_REPORTS_COUNT: 5,
-
-  // Chatwork設定シートの役割名
-  CHATWORK_ROLE_MANAGER: 'manager',
-  CHATWORK_ROLE_EMPLOYEE: 'employee',
-
-  // Chatwork設定シートのヘッダー名
-  CHATWORK_SETTINGS_HEADERS: ['グループ名', '氏名', 'ルームID', '役割', '週次レポートモード'],
-
-  // 日報ログシートのヘッダー名
-  DAILY_REPORT_LOG_HEADERS: ['タイムスタンプ', '氏名', 'マネージャー', '日報日付', '今日の業務内容', '今日の気分', '困っていること', 'AI評価状態', 'AI評価理由'],
-
-  // BOTアカウントIDのスクリプトプロパティキー
-  CHATWORK_BOT_ACCOUNT_ID_KEY: 'CHATWORK_BOT_ACCOUNT_ID',
-
-  // 1on1対象社員名のスクリプトプロパティキー
-  TARGET_EMPLOYEE_NAME_FOR_1ON1_KEY: 'TARGET_EMPLOYEE_NAME_FOR_1ON1',
-
-  // 自己評価フォルダIDのスクリプトプロパティキー
-  SELF_EVALUATION_FOLDER_ID_KEY: 'SELF_EVALUATION_FOLDER_ID',
-
-  // 自己評価入力シート名のスクリプトプロパティキー
-  SELF_EVALUATION_INPUT_SHEET_NAME_KEY: 'SELF_EVALUATION_INPUT_SHEET_NAME',
-
-  // 自己評価シートの氏名列ヘッダー名（デフォルト）
-  SELF_EVALUATION_DEFAULT_NAME_HEADER: '氏名',
-
-  // Gemini APIモデル名
-  GEMINI_MODEL_NAME: 'gemini-2.0-flash',
-
-  // 定期実行のデフォルト時刻
-  SCHEDULE_DEFAULTS: {
-    questionHour: 9,
-    questionMinute: 0,
-    replyHour: 18,
-    replyMinute: 0
-  }
-};
-
 /**
  * スプレッドシートを開いたときにカスタムメニューを追加する関数。
  */
@@ -82,7 +24,6 @@ function onOpen() {
  */
 function getScheduledTimes() {
   const properties = PropertiesService.getScriptProperties();
-  const defaults = CONFIG.SCHEDULE_DEFAULTS;
 
   const getPropertyAsInt = (key, defaultValue) => {
     const prop = properties.getProperty(key);
@@ -94,10 +35,10 @@ function getScheduledTimes() {
     return value;
   };
 
-  const questionHour = getPropertyAsInt('DAILY_QUESTION_TIME_HOUR', defaults.questionHour);
-  const questionMinute = getPropertyAsInt('DAILY_QUESTION_TIME_MINUTE', defaults.questionMinute);
-  const replyHour = getPropertyAsInt('DAILY_REPLY_COLLECT_TIME_HOUR', defaults.replyHour);
-  const replyMinute = getPropertyAsInt('DAILY_REPLY_COLLECT_TIME_MINUTE', defaults.replyMinute);
+  const questionHour = getPropertyAsInt('DAILY_QUESTION_TIME_HOUR', CONFIG.SCHEDULE_DEFAULTS.questionHour);
+  const questionMinute = getPropertyAsInt('DAILY_QUESTION_TIME_MINUTE', CONFIG.SCHEDULE_DEFAULTS.questionMinute);
+  const replyHour = getPropertyAsInt('DAILY_REPLY_COLLECT_TIME_HOUR', CONFIG.SCHEDULE_DEFAULTS.replyHour);
+  const replyMinute = getPropertyAsInt('DAILY_REPLY_COLLECT_TIME_MINUTE', CONFIG.SCHEDULE_DEFAULTS.replyMinute);
 
   return { questionHour, questionMinute, replyHour, replyMinute };
 }
@@ -129,17 +70,17 @@ function createDailyTriggers() {
     .timeBased()
     .everyWeeks(1)
     .onWeekDay(ScriptApp.WeekDay.MONDAY)
-    .atHour(10)
+    .atHour(CONFIG.TRIGGER_SETTINGS.WEEKLY_REPORT_HOUR)
     .create();
-  Logger.log(`週次レポート生成トリガーを毎週月曜日10時に設定しました。`);
+  Logger.log(`週次レポート生成トリガーを毎週月曜日${CONFIG.TRIGGER_SETTINGS.WEEKLY_REPORT_HOUR}時に設定しました。`);
 
   ScriptApp.newTrigger('cleanUpBotQuestionLog')
     .timeBased()
     .everyWeeks(1)
     .onWeekDay(ScriptApp.WeekDay.MONDAY)
-    .atHour(2)
+    .atHour(CONFIG.TRIGGER_SETTINGS.CLEANUP_HOUR)
     .create();
-  Logger.log(`BOT質問ログクリーンアップトリガーを毎週月曜日深夜2時に設定しました。`);
+  Logger.log(`BOT質問ログクリーンアップトリガーを毎週月曜日深夜${CONFIG.TRIGGER_SETTINGS.CLEANUP_HOUR}時に設定しました。`);
 
   SpreadsheetApp.getUi().alert('定期実行トリガーを設定しました。 質問送信: 毎日' + `${questionHour}時${questionMinute}分頃` + ' 返信収集: 毎日' + `${replyHour}時${replyMinute}分頃` + ' 週次レポート: 毎週月曜日10時' + ' ログクリーンアップ: 毎週月曜日深夜');
 }
@@ -162,15 +103,15 @@ function cleanUpBotQuestionLog() {
   }
 
   const rowsToDelete = [];
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const targetDate = new Date();
+  targetDate.setDate(targetDate.getDate() - CONFIG.TRIGGER_SETTINGS.CLEANUP_LOG_OLDER_THAN_DAYS);
 
   for (let i = 1; i < values.length; i++) {
     const row = values[i];
     const status = row[3].toString();
     const timestamp = new Date(row[2]);
 
-    if (status === '返信済み_処理成功' || ((status === '未返信' || status === '返信済み_フォーマット不正' || status.startsWith('エラー発生')) && timestamp < sevenDaysAgo)) {
+    if (status === CONFIG.STATUS_STRINGS.SUCCESS || ((status === CONFIG.STATUS_STRINGS.PENDING || status === CONFIG.STATUS_STRINGS.INVALID_FORMAT || status.startsWith(CONFIG.STATUS_STRINGS.ERROR_PREFIX)) && timestamp < targetDate)) {
       rowsToDelete.push(i + 1);
     }
   }
@@ -194,7 +135,7 @@ function deleteTriggers() {
  * Chatwork APIキーをスクリプトプロパティから取得する。
  */
 function getChatworkApiKey() {
-  const apiKey = PropertiesService.getScriptProperties().getProperty('CHATWORK_API_KEY');
+  const apiKey = PropertiesService.getScriptProperties().getProperty(CONFIG.CHATWORK_API_KEY);
   if (!apiKey) {
     throw new Error('Chatwork API Key is not set in Script Properties.');
   }
@@ -239,7 +180,7 @@ function getChatworkTargetRoomIds() {
     const name = row[headerMap['氏名']];
     const roomId = row[headerMap['ルームID']] ? row[headerMap['ルームID']].toString() : '';
     const role = row[headerMap['役割']] ? row[headerMap['役割']].toLowerCase() : '';
-    const weeklyReportMode = row[headerMap['週次レポートモード']] ? row[headerMap['週次レポートモード']].toLowerCase() : 'individual'; // デフォルトは'individual'
+    const weeklyReportMode = row[headerMap['週次レポートモード']] ? row[headerMap['週次レポートモード']].toLowerCase() : CONFIG.DEFAULT_WEEKLY_REPORT_MODE;
 
     if (!group || !name || !roomId || !role) {
       Logger.log(`警告: シート「${sheetName}」の${i + 1}行目に不足データがあります。スキップします。`);
@@ -290,11 +231,17 @@ function sendDailyReportQuestions() {
   const pendingQuestions = getPendingQuestionMessages();
 
   employeeList.forEach(employee => {
-    const { employeeName, employeeRoomId } = employee;
+    const { employeeName, employeeRoomId, role } = employee;
+
+    // マネージャーには日報質問を送信しない
+    if (role === CONFIG.CHATWORK_ROLE_MANAGER) {
+      Logger.log(`${employeeName}さん（ルームID: ${employeeRoomId}）はマネージャーのため、日報質問送信をスキップしました。`);
+      return;
+    }
 
     const existingPending = pendingQuestions.find(q =>
       q.roomId === employeeRoomId &&
-      (q.status === '未返信' || q.status === '返信済み_フォーマット不正' || q.status.startsWith('エラー発生'))
+      (q.status === CONFIG.STATUS_STRINGS.PENDING || q.status === CONFIG.STATUS_STRINGS.INVALID_FORMAT || q.status.startsWith(CONFIG.STATUS_STRINGS.ERROR_PREFIX))
     );
 
     if (existingPending) {
@@ -302,11 +249,14 @@ function sendDailyReportQuestions() {
       return;
     }
 
-    const message = `[To:${employeeRoomId}] ${employeeName}さん\nおはようございます！\n本日の日報を以下のフォーマットでご返信ください。\n\n#日報\n業務内容：\n気分：(良い/普通/少し悪い/悪い)\n困っていること：`;
+    const message = CONFIG.DAILY_REPORT_QUESTION_MESSAGE_TEMPLATE
+      .replace('{employeeRoomId}', employeeRoomId)
+      .replace('{employeeName}', employeeName);
+
     try {
       const response = sendChatworkNotification(employeeRoomId, message);
       const messageId = response.message_id.toString();
-      logQuestionMessageId(employeeRoomId, messageId, new Date(), '未返信');
+      logQuestionMessageId(employeeRoomId, messageId, new Date(), CONFIG.STATUS_STRINGS.PENDING);
       Logger.log(`${employeeName}さん (Room ID: ${employeeRoomId}) への質問送信に成功しました。メッセージID: ${messageId}`);
     } catch (e) {
       Logger.log(`${employeeName}さん (Room ID: ${employeeRoomId}) への質問送信に失敗しました: ${e.message}`);
@@ -326,48 +276,48 @@ function processChatworkReplies() {
     const { employeeName, employeeRoomId, managerName, managerRoomId } = employee;
 
     const questionsForThisRoom = pendingQuestions.filter(q =>
-      q.roomId === employeeRoomId && q.status !== '返信済み_処理成功'
+      q.roomId === employeeRoomId && q.status !== CONFIG.STATUS_STRINGS.SUCCESS
     );
 
     if (questionsForThisRoom.length === 0) {
       return;
     }
     
-    const lockedQuestion = questionsForThisRoom.find(q => q.status === '返信済み_フォーマット不正' || q.status.startsWith('エラー発生'));
+    const lockedQuestion = questionsForThisRoom.find(q => q.status === CONFIG.STATUS_STRINGS.INVALID_FORMAT || q.status.startsWith(CONFIG.STATUS_STRINGS.ERROR_PREFIX));
     if (lockedQuestion) {
         Logger.log(`${employeeName}さん (Room ID: ${employeeRoomId}) の日報はロックステータス（${lockedQuestion.status}）のためスキップしました。`);
         return;
     }
 
     try {
-      const messages = getChatworkMessages(employeeRoomId, 50);
+      const messages = getChatworkMessages(employeeRoomId, CONFIG.CHATWORK_FETCH_MESSAGE_COUNT);
 
       for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
         if (msg.account_id && msg.account_id.toString() === botAccountId) continue;
 
-        const replyMatch = msg.body.match(/\[rp aid=(\d+) to=(\d+)-(\d+)\]/);
+        const replyMatch = msg.body.match(CONFIG.CHATWORK_REPLY_REGEX);
         if (!replyMatch) continue;
 
         const repliedToMessageId = replyMatch[3];
         const matchedQuestion = questionsForThisRoom.find(q => q.messageId === repliedToMessageId);
 
         if (matchedQuestion) {
-          if (msg.body.includes('#日報')) {
+          if (msg.body.includes(CONFIG.REPORT_TAG)) {
             const reportData = parseReportFromMessage(employeeName, msg.body);
             const validationResult = validateDailyReport(reportData);
 
             if (validationResult.isValid) {
               try {
                 assessAndNotify(reportData, managerName, managerRoomId);
-                updateQuestionStatus(employeeRoomId, matchedQuestion.messageId, '返信済み_処理成功');
+                updateQuestionStatus(employeeRoomId, matchedQuestion.messageId, CONFIG.STATUS_STRINGS.SUCCESS);
               } catch (e) {
                 Logger.log(`日報処理中にエラーが発生しました: ${e.message}`);
-                updateQuestionStatus(employeeRoomId, matchedQuestion.messageId, 'エラー発生_その他', e.message);
+                updateQuestionStatus(employeeRoomId, matchedQuestion.messageId, CONFIG.STATUS_STRINGS.ERROR_GENERAL, e.message);
               }
             } else {
               Logger.log(`${employeeName}さんの日報はフォーマット不正です。詳細: ${validationResult.message}`);
-              updateQuestionStatus(employeeRoomId, matchedQuestion.messageId, '返信済み_フォーマット不正', validationResult.message);
+              updateQuestionStatus(employeeRoomId, matchedQuestion.messageId, CONFIG.STATUS_STRINGS.INVALID_FORMAT, validationResult.message);
             }
           }
           break; // このルームの処理を終了
@@ -384,7 +334,7 @@ function processChatworkReplies() {
  */
 function getChatworkMessages(roomId, count) {
   const apiKey = getChatworkApiKey();
-  const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages?force=1`;
+  const url = `${CONFIG.CHATWORK_API_BASE_URL}/rooms/${roomId}/messages?force=1`;
   const options = {
     method: 'get',
     headers: { 'X-ChatWorkToken': apiKey },
@@ -403,15 +353,15 @@ function getChatworkMessages(roomId, count) {
  * Chatworkメッセージから日報データを抽出する。
  */
 function parseReportFromMessage(name, messageBody) {
-  const workContentMatch = messageBody.match(/業務内容：\s*([\s\S]*?)(?=\n*気分：|\n*困っていること：|$)/);
-  const moodMatch = messageBody.match(/気分：\s*([\s\S]*?)(?=\n*困っていること：|$)/);
-  const problemsMatch = messageBody.match(/困っていること：\s*([\s\S]*)/);
+  const workContentMatch = messageBody.match(CONFIG.PARSE_REPORT_REGEX.WORK_CONTENT);
+  const moodMatch = messageBody.match(CONFIG.PARSE_REPORT_REGEX.MOOD);
+  const problemsMatch = messageBody.match(CONFIG.PARSE_REPORT_REGEX.PROBLEMS);
   return {
     date: new Date().toLocaleString('ja-JP'),
     name: name,
-    workContent: workContentMatch ? workContentMatch[1].trim() : 'N/A',
-    mood: moodMatch ? moodMatch[1].trim() : 'N/A',
-    problems: problemsMatch ? problemsMatch[1].trim() : '特になし'
+    workContent: workContentMatch ? workContentMatch[1].trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE,
+    mood: moodMatch ? moodMatch[1].trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE,
+    problems: problemsMatch ? problemsMatch[1].trim() : CONFIG.DEFAULT_VALUES.NO_PROBLEM
   };
 }
 
@@ -419,14 +369,13 @@ function parseReportFromMessage(name, messageBody) {
  * 日報データのバリデーションを行う。
  */
 function validateDailyReport(reportData) {
-  const moods = CONFIG.MOOD_OPTIONS;
-  if (!reportData.name || reportData.name.trim() === 'N/A') {
+  if (!reportData.name || reportData.name.trim() === CONFIG.DEFAULT_VALUES.NOT_APPLICABLE) {
     return { isValid: false, message: '氏名が空です。' };
   }
-  if (!reportData.workContent || reportData.workContent.trim() === 'N/A') {
+  if (!reportData.workContent || reportData.workContent.trim() === CONFIG.DEFAULT_VALUES.NOT_APPLICABLE) {
     return { isValid: false, message: '業務内容が空です。' };
   }
-  if (!reportData.mood || !moods.includes(reportData.mood.trim())) {
+  if (!reportData.mood || !CONFIG.MOOD_OPTIONS.includes(reportData.mood.trim())) {
     return { isValid: false, message: `気分に不正な値「${reportData.mood}」が入力されています。` };
   }
   return { isValid: true, message: '' };
@@ -441,9 +390,13 @@ function validateDailyReport(reportData) {
  * @param {string} managerRoomId マネージャーのルームID
  */
 function assessAndNotify(reportData, managerName, managerRoomId) {
-  const geminiPrompt = `以下の日報の内容を分析し、提出者の現在の心理状態や業務の調子について、5段階（非常に良い、良い、普通、少し悪い、危険）で評価してください。\n**特に「今日の気分」が悪い場合や、「困っていること」にネガティブな兆候が見られる場合は「危険」と判断し、その理由も簡潔に述べてください。**\n氏名は匿名化し、「提出者」として言及してください。\n\n業務内容：${reportData.workContent}\n気分：${reportData.mood}\n困っていること：${reportData.problems}\n\n結果はJSON形式で返してください。例: { "status": "危険", "reason": "具体例：今日の気分が悪いと申告しており、困っている内容にXXとあるため。" }`;
-  let geminiStatus = '不明';
-  let geminiReason = 'Gemini APIからの応答がありませんでした。';
+  const geminiPrompt = CONFIG.DAILY_REPORT_ASSESS_PROMPT_TEMPLATE
+    .replace('{workContent}', reportData.workContent)
+    .replace('{mood}', reportData.mood)
+    .replace('{problems}', reportData.problems);
+
+  let geminiStatus = CONFIG.DEFAULT_VALUES.UNKNOWN;
+  let geminiReason = CONFIG.DEFAULT_VALUES.NO_RESPONSE;
 
   try {
     const geminiResponse = callGeminiApi(geminiPrompt);
@@ -460,12 +413,19 @@ function assessAndNotify(reportData, managerName, managerRoomId) {
     Logger.log('Gemini API呼び出しまたは応答解析に失敗: ' + error.message);
   }
 
-  if (geminiStatus === '危険' || geminiStatus === '少し悪い') {
+  if (geminiStatus === CONFIG.STATUS_STRINGS.DANGER || geminiStatus === CONFIG.STATUS_STRINGS.WARNING) {
     if (!managerRoomId) {
       Logger.log("マネージャーのChatworkルームIDが不明なため、通知をスキップします。");
     } else {
-      const subject = `【注意】日報から社員の調子に懸念 - ${reportData.name}`;
-      const body = `[info][title]${subject}[/title]提出者：${reportData.name}\n日付：${reportData.date}\nGemini AIによる評価：${geminiStatus}\n理由：${geminiReason}\n[hr]▼ 日報抜粋\n今日の気分：${reportData.mood}\n困っていること：${reportData.problems}\n[hr]詳細については、スプレッドシートをご確認ください。[/info]`;
+      const subject = CONFIG.DAILY_REPORT_ALERT_SUBJECT_TEMPLATE.replace('{employeeName}', reportData.name);
+      const body = CONFIG.DAILY_REPORT_ALERT_BODY_TEMPLATE
+        .replace('{subject}', subject)
+        .replace('{employeeName}', reportData.name)
+        .replace('{date}', reportData.date)
+        .replace('{geminiStatus}', geminiStatus)
+        .replace('{geminiReason}', geminiReason)
+        .replace('{mood}', reportData.mood)
+        .replace('{problems}', reportData.problems);
       try {
         sendChatworkNotification(managerRoomId, body);
         Logger.log('Chatworkへの注意通知が正常に送信されました。');
@@ -498,7 +458,7 @@ function logReportToSheet(reportData, status, reason, managerName) {
   sheet.appendRow([
     new Date(),           // タイムスタンプ
     reportData.name,      // 氏名
-    managerName || 'N/A', // マネージャー名
+    managerName || CONFIG.DEFAULT_VALUES.NOT_APPLICABLE, // マネージャー名
     reportData.date,      // 日報日付
     reportData.workContent,
     reportData.mood,
@@ -515,7 +475,7 @@ function logReportToSheet(reportData, status, reason, managerName) {
 function sendChatworkNotification(roomId, message, subject = null) {
   try {
     const apiKey = getChatworkApiKey();
-    const url = `https://api.chatwork.com/v2/rooms/${roomId}/messages`;
+    const url = `${CONFIG.CHATWORK_API_BASE_URL}/rooms/${roomId}/messages`;
 
     // Chatwork記法がエンコードされないように、特殊なエンコード処理を実装します。
     // 1. 全体をエンコードして安全性を確保
@@ -560,7 +520,7 @@ function getBotChatworkAccountId() {
 
   try {
     const apiKey = getChatworkApiKey();
-    const url = 'https://api.chatwork.com/v2/me';
+    const url = `${CONFIG.CHATWORK_API_BASE_URL}/me`;
     const options = { method: 'get', headers: { 'X-ChatWorkToken': apiKey }, muteHttpExceptions: true };
     const response = UrlFetchApp.fetch(url, options);
     if (response.getResponseCode() !== 200) {
@@ -625,7 +585,7 @@ function updateQuestionStatus(roomId, messageId, newStatus, errorDetail = '') {
  * Gemini APIキーをスクリプトプロパティから取得する。
  */
 function getGeminiApiKey() {
-  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  const apiKey = PropertiesService.getScriptProperties().getProperty(CONFIG.GEMINI_API_KEY);
   if (!apiKey) throw new Error('Gemini API Key is not set in Script Properties.');
   return apiKey;
 }
@@ -695,7 +655,7 @@ function getDailyReportDataForEmployee(employeeName) {
   }
 
   const targetDate = new Date();
-  targetDate.setDate(targetDate.getDate() - CONFIG.DAILY_REPORT_LOG_FETCH_DAYS);
+  targetDate.setDate(targetDate.getDate() - CONFIG.DAILY_REPORT_LOG_FETCH_DAYS_FOR_1ON1);
 
   const employeeReports = dataRows.filter(row => {
     const reportName = row[nameCol] ? row[nameCol].toString().trim() : '';
@@ -706,11 +666,11 @@ function getDailyReportDataForEmployee(employeeName) {
   Logger.log(`${employeeName}さんの日報を ${employeeReports.length} 件抽出しました。`);
 
   if (employeeReports.length === 0) {
-    return `過去${CONFIG.DAILY_REPORT_LOG_FETCH_DAYS}日間の日報ログはありません。`;
+    return `過去${CONFIG.DAILY_REPORT_LOG_FETCH_DAYS_FOR_1ON1}日間の日報ログはありません。`;
   }
 
   // --- 日報ログの集約・要約 (ハイブリッド形式) ---
-  const moodCounts = { '非常に良い': 0, '良い': 0, '普通': 0, '少し悪い': 0, '悪い': 0 };
+  const moodCounts = CONFIG.MOOD_OPTIONS.reduce((acc, mood) => ({ ...acc, [mood]: 0 }), {});
   const problemKeywords = CONFIG.PROBLEM_KEYWORDS.reduce((acc, keyword) => ({ ...acc, [keyword]: 0 }), {});
   const positiveKeywords = new Set();
   const representativeReports = [];
@@ -719,13 +679,13 @@ function getDailyReportDataForEmployee(employeeName) {
   // AI評価が「危険」「少し悪い」の日報を優先的に収集
   const negativeReports = employeeReports.filter(report => {
     const aiStatus = report[aiStatusCol] ? report[aiStatusCol].toString().trim() : '';
-    return aiStatus === '危険' || aiStatus === '少し悪い';
+    return aiStatus === CONFIG.STATUS_STRINGS.DANGER || aiStatus === CONFIG.STATUS_STRINGS.WARNING;
   });
 
   // その他の日報から、月ごとにランダムに選択
   const otherReports = employeeReports.filter(report => {
     const aiStatus = report[aiStatusCol] ? report[aiStatusCol].toString().trim() : '';
-    return aiStatus !== '危険' && aiStatus !== '少し悪い';
+    return aiStatus !== CONFIG.STATUS_STRINGS.DANGER && aiStatus !== CONFIG.STATUS_STRINGS.WARNING;
   });
 
   // 代表的な日報の抜粋を収集 (最大件数はCONFIGで設定)
@@ -746,10 +706,10 @@ function getDailyReportDataForEmployee(employeeName) {
   }
 
   reportsToSample.slice(0, CONFIG.REPRESENTATIVE_REPORTS_COUNT).forEach(report => {
-    const reportDate = report[dateCol] ? new Date(report[dateCol]).toLocaleDateString('ja-JP') : 'N/A';
-    const mood = report[moodCol] ? report[moodCol].toString().trim() : 'N/A';
-    const problems = report[problemsCol] ? truncateText(report[problemsCol].toString().trim(), 50) : '特になし';
-    const aiStatus = report[aiStatusCol] ? report[aiStatusCol].toString().trim() : 'N/A';
+    const reportDate = report[dateCol] ? new Date(report[dateCol]).toLocaleDateString('ja-JP') : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE;
+    const mood = report[moodCol] ? report[moodCol].toString().trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE;
+    const problems = report[problemsCol] ? truncateText(report[problemsCol].toString().trim(), CONFIG.TRUNCATE_TEXT_MAX_LENGTH_EXCERPT) : CONFIG.DEFAULT_VALUES.NO_PROBLEM;
+    const aiStatus = report[aiStatusCol] ? report[aiStatusCol].toString().trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE;
     representativeReports.push(`日付: ${reportDate}, 気分: ${mood}, 困り事: ${problems}, AI評価: ${aiStatus}`);
   });
 
@@ -768,10 +728,10 @@ function getDailyReportDataForEmployee(employeeName) {
 
     const workContent = report[workContentCol] ? report[workContentCol].toString().trim() : '';
     if (mood === '良い' || mood === '非常に良い') {
-      if (workContent.includes('リリース')) positiveKeywords.add('新規機能リリース');
-      if (workContent.includes('顧客') && (workContent.includes('高評価') || workContent.includes('感謝'))) positiveKeywords.add('顧客高評価');
-      if (workContent.includes('改善')) positiveKeywords.add('業務改善');
-      if (workContent.includes('達成')) positiveKeywords.add('目標達成');
+      if (workContent.includes(CONFIG.POSITIVE_KEYWORDS.RELEASE)) positiveKeywords.add('新規機能リリース');
+      if (CONFIG.POSITIVE_KEYWORDS.CUSTOMER_APPRECIATION_KEYWORDS.some(kw => workContent.includes(kw))) positiveKeywords.add('顧客高評価');
+      if (workContent.includes(CONFIG.POSITIVE_KEYWORDS.IMPROVEMENT)) positiveKeywords.add('業務改善');
+      if (workContent.includes(CONFIG.POSITIVE_KEYWORDS.ACHIEVEMENT)) positiveKeywords.add('目標達成');
     }
   });
 
@@ -800,7 +760,7 @@ function getDailyReportDataForEmployee(employeeName) {
     excerptsSummary = `\n\n代表的な日報の抜粋 (最大${CONFIG.REPRESENTATIVE_REPORTS_COUNT}件):\n` + representativeReports.map(r => `- ${r}`).join('\n');
   }
 
-  const finalSummary = `過去${CONFIG.DAILY_REPORT_LOG_FETCH_DAYS}日間の日報サマリー (${employeeReports.length}件のデータ):\n${quantitativeSummary}${excerptsSummary}`;
+  const finalSummary = `過去${CONFIG.DAILY_REPORT_LOG_FETCH_DAYS_FOR_1ON1}日間の日報サマリー (${employeeReports.length}件のデータ):\n${quantitativeSummary}${excerptsSummary}`;
 
   Logger.log(`${employeeName}さんの日報ログ要約が完了しました。`);
   return finalSummary;
@@ -823,14 +783,14 @@ function getSelfEvaluationDataForEmployee(employeeName, folderId, sheetName) {
 
     while (files.hasNext()) {
       const file = files.next();
-      if (file.getName().toLowerCase().includes(normalizedEmployeeName) && file.getName().includes("自己評価")) {
+      if (file.getName().toLowerCase().includes(normalizedEmployeeName) && file.getName().includes(CONFIG.SELF_EVAL_FILENAME_KEYWORD)) {
         selfEvalFile = file;
         break;
       }
     }
 
     if (!selfEvalFile) {
-      Logger.log(`自己評価シートが見つかりませんでした: ${employeeName}さんの「自己評価」を含むGoogleスプレッドシートファイルがフォルダID ${folderId} 内に見つかりません。`);
+      Logger.log(`自己評価シートが見つかりませんでした: ${employeeName}さんの「${CONFIG.SELF_EVAL_FILENAME_KEYWORD}」を含むGoogleスプレッドシートファイルがフォルダID ${folderId} 内に見つかりません。`);
       return null;
     }
 
@@ -885,15 +845,14 @@ function getSelfEvaluationDataForEmployee(employeeName, folderId, sheetName) {
     }
     Logger.log(`社員「${employeeName}」さんのデータを1件見つけました。`);
 
-    extractedData.employeeName = employeeRow[employeeNameHeaderIndex] ? employeeRow[employeeNameHeaderIndex].toString().trim() : 'N/A';
+    extractedData.employeeName = employeeRow[employeeNameHeaderIndex] ? employeeRow[employeeNameHeaderIndex].toString().trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE;
 
-    const evaluationPeriodIndex = headerMap['評価期間'];
+    const evaluationPeriodIndex = headerMap[CONFIG.SELF_EVAL_PERIOD_HEADER];
     if (evaluationPeriodIndex !== undefined) {
       extractedData.evaluationPeriod = employeeRow[evaluationPeriodIndex] ? employeeRow[evaluationPeriodIndex].toString().trim() : '';
     }
 
-    const SINGLE_ITEM_HEADERS = ['来季目標', '目標達成のためにサポートしてほしい事', 'サポート方針', '目標グレード'];
-    SINGLE_ITEM_HEADERS.forEach(itemHeader => {
+    CONFIG.SELF_EVAL_SINGLE_ITEM_HEADERS.forEach(itemHeader => {
       const colIndex = headerMap[itemHeader];
       if (colIndex !== undefined) {
         const value = employeeRow[colIndex];
@@ -903,12 +862,11 @@ function getSelfEvaluationDataForEmployee(employeeName, folderId, sheetName) {
       }
     });
 
-    const questionSuffixes = ['_設問内容', '_本人コメント', '_マネージャコメント', '_自己評価', '_マネージャ評価'];
     const questionNames = new Set();
 
     header.forEach(h => {
       if (typeof h === 'string') {
-        for (const suffix of questionSuffixes) {
+        for (const suffix of CONFIG.SELF_EVAL_QUESTION_SUFFIXES) {
           if (h.endsWith(suffix)) {
             questionNames.add(h.replace(suffix, '').trim());
             break;
@@ -927,7 +885,7 @@ function getSelfEvaluationDataForEmployee(employeeName, folderId, sheetName) {
         managerEvaluation: ''
       };
 
-      questionSuffixes.forEach(suffix => {
+      CONFIG.SELF_EVAL_QUESTION_SUFFIXES.forEach(suffix => {
         const fullHeader = `${qName}${suffix}`;
         const colIndex = headerMap[fullHeader];
         if (colIndex !== undefined) {
@@ -1048,9 +1006,10 @@ function generate1on1Topics() {
   if (selfEvalData['サポート方針']) promptSelfEvalData += `サポート方針: ${selfEvalData['サポート方針']}\n`;
   if (selfEvalData['目標グレード']) promptSelfEvalData += `目標グレード: ${selfEvalData['目標グレード']}\n`;
 
-  const anonymousName = `対象者`;
-
-  const geminiPrompt = `以下の${anonymousName}さんの過去1年間の日報サマリーと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが${anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。\n\n**過去1年間の日報サマリー：**\n${dailyReportSummary}\n\n**自己評価シートデータ：**\n${promptSelfEvalData}\n\n---\n\n**【重要】回答フォーマットの厳守**\n以下のフォーマットに厳密に従って、5つのヒアリング項目を提案してください。各項目は、質問と根拠を明確に分けて記述してください。\n\n*1. [ここに1つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに1つ目の質問の根拠を記述]\n\n*2. [ここに2つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに2つ目の質問の根拠を記述]\n\n*3. [ここに3つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに3つ目の質問の根拠を記述]\n\n*4. [ここに4つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに4つ目の質問の根拠を記述]\n\n*5. [ここに5つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに5つ目の質問の根拠を記述]`;
+  const geminiPrompt = CONFIG.ONE_ON_ONE_PROMPT_TEMPLATE
+    .replace('{anonymousName}', CONFIG.ANONYMOUS_EMPLOYEE_NAME)
+    .replace('{dailyReportSummary}', dailyReportSummary)
+    .replace('{promptSelfEvalData}', promptSelfEvalData);
 
   try {
     const geminiResponse = callGeminiApi(geminiPrompt);
@@ -1082,8 +1041,10 @@ function generate1on1Topics() {
     }
     // --- 整形ロジックここまで ---
 
-    const subject = `【1on1ヒアリング項目提案】${targetEmployeeName}さん向け`;
-    const body = `${subject}\n[hr]\n\n▼ 提案されたヒアリング項目\n\n${formattedTopics.trim()}\n\n[hr]\nこの提案は、日報ログと自己評価シートの分析に基づいています。詳細なデータはスプレッドシートをご確認ください`;
+    const subject = CONFIG.ONE_ON_ONE_SUBJECT_TEMPLATE.replace('{employeeName}', targetEmployeeName);
+    const body = CONFIG.ONE_ON_ONE_BODY_TEMPLATE
+      .replace('{subject}', subject)
+      .replace('{formattedTopics}', formattedTopics.trim());
 
     sendChatworkNotification(managerRoomId, body);
     Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
@@ -1134,9 +1095,9 @@ function generateWeeklyReports() {
     for (const managerRoomId in managersToProcess) {
       const managerData = managersToProcess[managerRoomId];
       const today = new Date();
-      const subjectDate = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}週`;
+      const subjectDate = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}`;
 
-      if (managerData.weeklyReportMode === 'individual') {
+      if (managerData.weeklyReportMode === CONFIG.WEEKLY_REPORT_MODES.INDIVIDUAL) {
         // Individual report mode (週次メンバーコンディションレポート)
         Logger.log(`マネージャー「${managerData.name}」さん向けに個別週次レポートを生成します。`);
         const allIndividualReportsForManager = [];
@@ -1166,13 +1127,13 @@ function generateWeeklyReports() {
             }
           });
 
-          const subject = `【週次メンバーコンディションレポート】${managerData.name}さん向け - ${subjectDate}`;
+          const subject = `【週次メンバーコンディションレポート】${managerData.name}さん向け - ${subjectDate}週`;
           const finalCombinedReportBody = `${subject}\n[hr]\n\n▼ 各メンバーのコンディションサマリー\n\n${combinedReportBody}\n\n詳細については、日報ログスプレッドシートをご確認ください。`;
           sendChatworkNotification(managerData.roomId, finalCombinedReportBody);
           Logger.log(`マネージャー「${managerData.name}」さんへ週次メンバーコンディションレポートを通知しました。`);
         }
 
-      } else if (managerData.weeklyReportMode === 'team') {
+      } else if (managerData.weeklyReportMode === CONFIG.WEEKLY_REPORT_MODES.TEAM) {
         // Team summary mode (週次チームコンディションサマリー)
         Logger.log(`グループ「${managerData.groupName}」向けに週次チームコンディションサマリーを生成します。`);
         const teamEmployees = managerData.employees.filter(emp => emp.role === CONFIG.CHATWORK_ROLE_EMPLOYEE);
@@ -1180,8 +1141,13 @@ function generateWeeklyReports() {
           const summaryData = getWeeklyTeamReportSummaryForGroup(teamEmployees.map(e => e.employeeName));
           if (summaryData) {
             const teamSummaryReport = generateTeamSummaryReportWithGemini(summaryData, managerData.groupName);
-            const subject = `【週次チームコンディションサマリー】${managerData.groupName} - ${subjectDate}`;
-            sendChatworkNotification(managerData.roomId, `${subject}\n\n${teamSummaryReport}`);
+            const subject = CONFIG.TEAM_SUMMARY_SUBJECT_TEMPLATE
+              .replace('{groupName}', managerData.groupName)
+              .replace('{date}', subjectDate);
+            const body = CONFIG.TEAM_SUMMARY_BODY_TEMPLATE
+              .replace('{subject}', subject)
+              .replace('{reportBody}', teamSummaryReport);
+            sendChatworkNotification(managerData.roomId, body);
             Logger.log(`マネージャー「${managerData.name}」さんへグループ「${managerData.groupName}」の週次チームコンディションサマリーを通知しました。`);
           } else {
             Logger.log(`グループ「${managerData.groupName}」の過去1週間の日報データが見つかりませんでした。`);
@@ -1242,19 +1208,19 @@ function getWeeklyRawReports(employeeName) {
   }
 
   const oneWeekAgo = new Date();
-  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+  oneWeekAgo.setDate(oneWeekAgo.getDate() - CONFIG.WEEKLY_REPORT_FETCH_DAYS);
 
   const employeeWeeklyReports = dataRows.filter(row => {
     const reportName = row[nameCol] ? row[nameCol].toString().trim() : '';
     const reportDate = row[dateCol] ? new Date(row[dateCol]) : null;
     return reportName.toLowerCase() === employeeName.toLowerCase() && reportDate && reportDate >= oneWeekAgo;
   }).map(row => ({
-    date: row[dateCol] ? new Date(row[dateCol]).toLocaleDateString('ja-JP') : 'N/A',
-    workContent: row[workContentCol] ? row[workContentCol].toString().trim() : 'N/A',
-    mood: row[moodCol] ? row[moodCol].toString().trim() : 'N/A',
-    problems: row[problemsCol] ? row[problemsCol].toString().trim() : 'N/A',
-    aiStatus: row[aiStatusCol] ? row[aiStatusCol].toString().trim() : 'N/A',
-    aiReason: row[aiReasonCol] ? row[aiReasonCol].toString().trim() : 'N/A'
+    date: row[dateCol] ? new Date(row[dateCol]).toLocaleDateString('ja-JP') : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE,
+    workContent: row[workContentCol] ? row[workContentCol].toString().trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE,
+    mood: row[moodCol] ? row[moodCol].toString().trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE,
+    problems: row[problemsCol] ? row[problemsCol].toString().trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE,
+    aiStatus: row[aiStatusCol] ? row[aiStatusCol].toString().trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE,
+    aiReason: row[aiReasonCol] ? row[aiReasonCol].toString().trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE
   }));
 
   return employeeWeeklyReports;
@@ -1294,7 +1260,7 @@ function getWeeklyTeamReportSummaryForGroup(employeeNames) {
   }
 
   const oneWeekAgo = new Date();
-  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+  oneWeekAgo.setDate(oneWeekAgo.getDate() - CONFIG.WEEKLY_REPORT_FETCH_DAYS);
 
   const weeklyReports = dataRows.filter(row => {
     const reportName = row[nameCol] ? row[nameCol].toString().trim() : '';
@@ -1313,12 +1279,12 @@ function getWeeklyTeamReportSummaryForGroup(employeeNames) {
 
   weeklyReports.forEach(report => {
     // 気分集計
-    const mood = report[moodCol] ? report[moodCol].toString().trim() : '不明';
+    const mood = report[moodCol] ? report[moodCol].toString().trim() : CONFIG.DEFAULT_VALUES.UNKNOWN;
     moodCounts[mood] = (moodCounts[mood] || 0) + 1;
 
     // 課題キーワード集計
     const problems = report[problemsCol] ? report[problemsCol].toString().trim() : '';
-    if (problems && problems !== '特になし') {
+    if (problems && problems !== CONFIG.DEFAULT_VALUES.NO_PROBLEM) {
         for (const keyword of CONFIG.PROBLEM_KEYWORDS) {
             if (problems.includes(keyword)) {
                 problemKeywords[keyword] = (problemKeywords[keyword] || 0) + 1;
@@ -1337,9 +1303,9 @@ function getWeeklyTeamReportSummaryForGroup(employeeNames) {
   });
 
   const commonProblems = Object.entries(problemKeywords)
-    .filter(([, count]) => count > 1)
+    .filter(([, count]) => count > CONFIG.COMMON_PROBLEMS_MIN_COUNT)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
+    .slice(0, CONFIG.COMMON_PROBLEMS_MAX_DISPLAY)
     .map(([keyword]) => keyword);
 
   return {
@@ -1358,12 +1324,14 @@ function getWeeklyTeamReportSummaryForGroup(employeeNames) {
  */
 function generateIndividualReportWithGemini(rawReports, employeeName) {
   const reportEntries = rawReports.map(r => 
-    `日付: ${r.date}, 業務内容: ${r.workContent}, 気分: ${r.mood}, 困り事: ${r.problems}, AI評価: ${r.aiStatus || 'N/A'}`
+    `日付: ${r.date}, 業務内容: ${r.workContent}, 気分: ${r.mood}, 困り事: ${r.problems}, AI評価: ${r.aiStatus || CONFIG.DEFAULT_VALUES.NOT_APPLICABLE}`
   ).join('\n');
 
-  const anonymousName = employeeName; // 匿名化する場合はここで処理
+  const anonymousName = CONFIG.ANONYMOUS_EMPLOYEE_NAME_SHORT;
 
-  const individualReportPrompt = `以下の${anonymousName}さんの過去1週間分の日報データから、このメンバーのコンディションの傾向、個人的な課題、ポジティブな動きについて分析し、簡潔なレポートを生成してください。マネージャーが週ごとの傾向を**一目で把握できるよう、以下のフォーマットに厳密に従って**記述してください。\n\n**過去1週間分の${anonymousName}さんの日報データ：**\n${reportEntries}\n\n---\n\n**【重要】回答フォーマットの厳守**\n以下のフォーマットに厳密に従って、レポートを記述してください。Markdown記号（例: **、*）やChatwork記法（例: [info]、[ul]、[li]）は一切使用しないでください。「- 」や「1. 」などの手動の箇条書き記号は使用可能です。各項目は簡潔に記述し、全体で最大150文字程度に収めてください。\n\n▼ 今週の${anonymousName}さんのコンディションサマリー\n- コンディション概要: [今週の気分傾向とAI評価の総合的な要約。例: 概ね良好、週後半にやや疲労感あり]\n- 主な課題: [報告された困りごとや課題の要約。例: テスト環境構築の遅延、顧客要望の整理に苦戦]\n- ポジティブな点: [業務内容や気分から見られる良い点、成果の要約。例: 新機能リリース貢献、チーム内協力推進]\n- 特記事項: [懸念すべき点や特に注目すべき変化があれば簡潔に。例: 〇〇に関する残業が〇回発生]\n\n`;
+  const individualReportPrompt = CONFIG.INDIVIDUAL_REPORT_PROMPT_TEMPLATE
+    .replace(/{anonymousName}/g, anonymousName)
+    .replace('{reportEntries}', reportEntries);
 
   try {
     Logger.log(`Gemini APIに${employeeName}さんの個別レポート生成をリクエストします。`);
@@ -1372,8 +1340,10 @@ function generateIndividualReportWithGemini(rawReports, employeeName) {
     Logger.log(`Gemini APIから${employeeName}さんの個別レポートを取得しました。`);
 
     const today = new Date();
-    const subjectDate = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}週`;
-    const subject = `【週次メンバーコンディションレポート】${anonymousName} - ${subjectDate}`;
+    const subjectDate = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}`;
+    const subject = CONFIG.INDIVIDUAL_REPORT_SUBJECT_TEMPLATE
+      .replace('{anonymousName}', employeeName)
+      .replace('{date}', subjectDate);
 
     return { reportText, subject }; // Return an object
   } catch (e) {
@@ -1393,24 +1363,12 @@ function generateTeamSummaryReportWithGemini(summaryData, groupName) {
   const problemsSummary = summaryData.commonProblems.length > 0 ? summaryData.commonProblems.join(', ') : '特筆すべき共通課題は報告されていません。';
   const positivesSummary = summaryData.positiveTrends.length > 0 ? summaryData.positiveTrends.join(', ') : '特筆すべきポジティブな動きは報告されていません。';
 
-  const teamSummaryPrompt = `
-以下の過去1週間分の${groupName}チーム日報データから、チーム全体のコンディションの傾向、共通して報告された課題、ポジティブな動きについて分析し、簡潔なサマリーレポートを生成してください。
-物語形式で、マネージャーがチームの「空気感」を把握しやすいように記述してください。具体的な社員名は匿名化してください。
-
-**チーム日報データ概要（過去1週間）：**
-- 総日報数: ${summaryData.totalReports}件
-- 気分報告の傾向: ${moodSummary}
-- 共通の課題: ${problemsSummary}
-- ポジティブな動き: ${positivesSummary}
-
-**【重要】ネガティブな傾向の強調**: もし「少し悪い」または「悪い」の気分報告や、具体的な「困っていること」が複数回報告されている場合は、その傾向と潜在的な影響について、レポート内で明確に言及してください。チーム全体の「空気感」を伝える上で、これらのネガティブな側面も適切に含めてください。
-
-レポートは、以下の構成で記述してください。
-[hr]
-▼ 今週の${groupName}チームコンディションサマリー
-[サマリー本文]
-[hr]
-`;
+  const teamSummaryPrompt = CONFIG.TEAM_SUMMARY_PROMPT_TEMPLATE
+    .replace('{groupName}', groupName)
+    .replace('{totalReports}', summaryData.totalReports)
+    .replace('{moodSummary}', moodSummary)
+    .replace('{problemsSummary}', problemsSummary)
+    .replace('{positivesSummary}', positivesSummary);
 
   try {
     Logger.log('Gemini APIにサマリー生成をリクエストします。');
