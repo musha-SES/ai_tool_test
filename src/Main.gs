@@ -1327,9 +1327,12 @@ function generateIndividualReportWithGemini(rawReports, employeeName) {
     `日付: ${r.date}, 業務内容: ${r.workContent}, 気分: ${r.mood}, 困り事: ${r.problems}, AI評価: ${r.aiStatus || CONFIG.DEFAULT_VALUES.NOT_APPLICABLE}`
   ).join('\n');
 
-  const individualReportPrompt = CONFIG.INDIVIDUAL_REPORT_PROMPT_TEMPLATE
-    .replace(/{anonymousName}/g, employeeName)
-    .replace('{reportEntries}', reportEntries);
+  const individualReportPrompt = CONFIG.WEEKLY_REPORT_PROMPT_TEMPLATE
+    .replace(/{reportType}/g, CONFIG.ANONYMOUS_EMPLOYEE_NAME_SHORT)
+    .replace(/{subjectName}/g, employeeName)
+    .replace(/{dataSummary}/g, reportEntries)
+    .replace(/{specificEmphasis}/g, '')
+    .replace(/{reportBody}/g, '[ここにレポート本文を記述。物語形式で、メンバーの「空気感」を伝えるように記述してください。以下の要素を盛り込むことを推奨します。]\n- 全体的な傾向や雰囲気\n- 特に注目すべきポジティブな点（具体的な業務内容や成果に触れる）\n- 潜在的な課題や懸念点（背景や影響にも触れる）\n- 変化の兆候や、今後注目すべき点\n\n[レポート本文の具体的な記述例]\n今週の[社員名/チーム名]は、[全体的な傾向、例：概ね良好なコンディションを維持しました]。[ポジティブな点、例：特に〇〇プロジェクトでの新規機能リリースに貢献し、高い達成感が見られました]。一方で、[懸念点、例：週後半にはテスト環境の不安定さに起因する軽微なストレスも報告されており、注意が必要です]。全体として、[今後の展望や注目点、例：来週の進捗に期待しつつ、〇〇の状況を注視していきます]。');
 
   try {
     Logger.log(`Gemini APIに${employeeName}さんの個別レポート生成をリクエストします。`);
@@ -1361,12 +1364,12 @@ function generateTeamSummaryReportWithGemini(summaryData, groupName) {
   const problemsSummary = summaryData.commonProblems.length > 0 ? summaryData.commonProblems.join(', ') : '特筆すべき共通課題は報告されていません。';
   const positivesSummary = summaryData.positiveTrends.length > 0 ? summaryData.positiveTrends.join(', ') : '特筆すべきポジティブな動きは報告されていません。';
 
-  const teamSummaryPrompt = CONFIG.TEAM_SUMMARY_PROMPT_TEMPLATE
-    .replace('{groupName}', groupName)
-    .replace('{totalReports}', summaryData.totalReports)
-    .replace('{moodSummary}', moodSummary)
-    .replace('{problemsSummary}', problemsSummary)
-    .replace('{positivesSummary}', positivesSummary);
+  const dataSummary = `総日報数: ${summaryData.totalReports}件\n気分報告の傾向: ${moodSummary}\n共通の課題: ${problemsSummary}\nポジティブな動き: ${positivesSummary}`;
+
+  const teamSummaryPrompt = CONFIG.WEEKLY_REPORT_PROMPT_TEMPLATE
+    .replace(/{reportType}/g, 'チーム')
+    .replace(/{subjectName}/g, groupName)
+    .replace(/{dataSummary}/g, dataSummary)
 
   try {
     Logger.log('Gemini APIにサマリー生成をリクエストします。');
