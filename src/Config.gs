@@ -105,7 +105,7 @@ const CONFIG = {
   // --- Geminiプロンプトテンプレート ---
   DAILY_REPORT_QUESTION_MESSAGE_TEMPLATE: `[To:{employeeRoomId}] {employeeName}さん\nおはようございます！\n本日の日報を以下のフォーマットでご返信ください。\n\n#日報\n業務内容：\n気分：(良い/普通/少し悪い/悪い)\n困っていること：`,
 
-  DAILY_REPORT_ASSESS_PROMPT_TEMPLATE: `以下の日報の内容を分析し、提出者の現在の心理状態や業務の調子について、**4段階（良い、普通、少し悪い、悪い）で評価してください。ただし、特に「今日の気分」が悪い場合や、「困っていること」にネガティブな兆候が見られる場合は、評価を「危険」としてください。**\n氏名は匿名化し、「提出者」として言及してください。\n\n業務内容：{workContent}\n気分：{mood}\n困っていること：{problems}\n\n結果はJSON形式で返してください。例: { "status": "危険", "reason": "具体例：今日の気分が悪いと申告しており、困っている内容にXXとあるため。" }`
+  DAILY_REPORT_ASSESS_PROMPT_TEMPLATE: `以下の日報の内容を分析し、提出者の現在の心理状態や業務の調子について、**4段階（良い、普通、少し悪い、悪い）で評価してください。ただし、特に「今日の気分」が悪い場合や、「困っていること」にネガティブな兆候が見られる場合は、評価を「危険」としてください。**\n氏名は匿名化し、「提出者」として言及してください。\n\n業務内容：{workContent}\n気分：{mood}\n困っていること：{problems}\n\n結果はJSON形式で返してください。例: { "status": "危険", "reason": "具体例：今日の気分が悪いと申告しており、困っている内容にXXとあるため。" }`,
 
   DAILY_REPORT_ALERT_SUBJECT_TEMPLATE: `【注意】日報から社員の調子に懸念 - {employeeName}`,
   DAILY_REPORT_ALERT_BODY_TEMPLATE: `[info][title]{subject}[/title]提出者：{employeeName}\n日付：{date}\nGemini AIによる評価：{geminiStatus}\n理由：{geminiReason}\n[hr]▼ 日報抜粋\n今日の気分：{mood}\n困っていること：{problems}\n[hr]詳細については、スプレッドシートをご確認ください。[/info]`,
