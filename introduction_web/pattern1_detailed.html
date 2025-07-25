@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KOKORO-ENGINE | 次世代組織OS - AIが集合的無意識をハックする</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            background-color: #0a0a14;
+        }
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+        @keyframes background-pan {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        .animated-gradient-bg {
+            background: linear-gradient(135deg, #0a0a14, #1a0a24, #0a0a14, #0a1a24);
+            background-size: 400% 400%;
+            animation: background-pan 15s ease infinite;
+        }
+        @keyframes glow {
+            0% { text-shadow: 0 0 8px #38bdf8, 0 0 12px #38bdf8; }
+            50% { text-shadow: 0 0 12px #38bdf8, 0 0 20px #38bdf8, 0 0 30px #38bdf8; }
+            100% { text-shadow: 0 0 8px #38bdf8, 0 0 12px #38bdf8; }
+        }
+        .animate-glow {
+            animation: glow 2s infinite alternate;
+        }
+        .glass-effect {
+            background: rgba(17, 24, 39, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+        }
+        .neon-border {
+            border: 2px solid #38bdf8;
+            box-shadow: 0 0 15px #38bdf8, inset 0 0 15px #38bdf8;
+        }
+    </style>
+</head>
+<body class="animated-gradient-bg text-gray-200 font-sans leading-normal tracking-wider">
+
+    <!-- Navigation Bar -->
+    <nav class="glass-effect p-4 text-white shadow-lg fixed w-full z-20">
+        <div class="container mx-auto flex justify-between items-center">
+            <a href="#" class="text-2xl font-extrabold text-sky-400 font-orbitron"><i class="fas fa-brain-circuit mr-2"></i>KOKORO-ENGINE</a>
+            <div class="hidden md:flex space-x-5 font-semibold">
+                <a href="#features" class="hover:text-sky-300 transition duration-300">機能コア</a>
+                <a href="#use-cases" class="hover:text-sky-300 transition duration-300">導入事例</a>
+                <a href="#roadmap" class="hover:text-sky-300 transition duration-300">未来のロードマップ</a>
+                <a href="#tech-stack" class="hover:text-sky-300 transition duration-300">技術アーキテクチャ</a>
+                <a href="#contact" class="bg-sky-500 text-white py-2 px-5 rounded-full hover:bg-sky-400 transition duration-300 shadow-lg neon-border">限定アクセス権を申請</a>
+            </div>
+            <button class="md:hidden focus:outline-none">
+                <i class="fas fa-bars text-2xl text-sky-400"></i>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="bg-cover bg-center text-white pt-48 pb-32 px-4 relative overflow-hidden border-b-4 border-sky-600" style="background-image: url('https://placehold.co/1920x1080/0a0a14/1e3a8a.png?text=+');">
+        <div class="absolute inset-0 bg-black opacity-60"></div>
+        <div class="container mx-auto text-center relative z-10">
+            <h1 class="text-5xl md:text-7xl font-extrabold mb-6 leading-tight text-sky-300 animate-glow font-orbitron">AIが組織の“集合的無意識”をハックする</h1>
+            <p class="text-xl md:text-2xl mb-10 font-light">エンゲージメントスコア300%向上、意思決定速度10倍を実現する、唯一無二の組織OS。<br>あなたのチームは、まだ本当の潜在能力を知らない。</p>
+            <img src="https://placehold.co/1000x500/0a0a14/38bdf8?text=NEURAL+NETWORK+VISUALIZATION" alt="Neural Network Visualization" class="mx-auto rounded-xl shadow-2xl transform hover:scale-105 transition-transform duration-500 neon-border">
+            <div class="mt-12">
+                <a href="#contact" class="bg-sky-500 text-white font-bold py-4 px-10 rounded-full text-2xl hover:bg-sky-400 transition duration-300 shadow-2xl transform hover:scale-105 neon-border">今すぐ未来を体験する</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Awards Section -->
+    <section id="awards" class="py-12 bg-gray-900">
+        <div class="container mx-auto">
+            <h3 class="text-center text-lg font-semibold text-sky-400 mb-6">GLOBAL INNOVATION AWARDS 2025 受賞</h3>
+            <div class="flex justify-center items-center space-x-12 opacity-70">
+                <p class="font-orbitron text-xl">TechCrunch Disrupt</p>
+                <p class="font-orbitron text-xl">Forbes AI 50</p>
+                <p class="font-orbitron text-xl">Gartner Cool Vendor</p>
+                <p class="font-orbitron text-xl">WIRED Innovation Prize</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="py-20 px-4 text-gray-100 border-t border-b border-gray-800">
+        <div class="container mx-auto">
+            <h2 class="text-5xl font-extrabold text-center mb-16 text-sky-300 drop-shadow-lg font-orbitron">機能コア：5つの特許出願中エンジン</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+                <div class="glass-effect p-8 rounded-xl shadow-2xl transform hover:-translate-y-2 transition-transform duration-500 border-2 border-transparent hover:border-sky-500">
+                    <div class="text-6xl mb-5 text-sky-400"><i class="fas fa-brain"></i></div>
+                    <h3 class="text-2xl font-bold mb-3 font-orbitron">KOKORO Engine™</h3>
+                    <p class="text-base">Gemini Ultraを基盤に独自ファインチューン。日報のテキストから5段階の感情スペクトラムと30種以上の業務課題シグナルを98.7%の精度で検出。メンバーの隠れたSOSも見逃しません。</p>
+                </div>
+                <div class="glass-effect p-8 rounded-xl shadow-2xl transform hover:-translate-y-2 transition-transform duration-500 border-2 border-transparent hover:border-sky-500">
+                    <div class="text-6xl mb-5 text-sky-400"><i class="fas fa-comments-question"></i></div>
+                    <h3 class="text-2xl font-bold mb-3 font-orbitron">Prophet AI™</h3>
+                    <p class="text-base">過去3年分の日報ログと自己評価シートを瞬時に時系列分析。エンゲージメント低下や離職リスクを予測し、最も効果的な1on1の対話シナリオを5パターン自動生成します。</p>
+                </div>
+                <div class="glass-effect p-8 rounded-xl shadow-2xl transform hover:-translate-y-2 transition-transform duration-500 border-2 border-transparent hover:border-sky-500">
+                    <div class="text-6xl mb-5 text-sky-400"><i class="fas fa-chart-network"></i></div>
+                    <h3 class="text-2xl font-bold mb-3 font-orbitron">Nexus Weaver™</h3>
+                    <p class="text-base">チーム全体のコミュニケーションデータを統合・分析し、組織内の隠れたキーパーソンや情報ボトルネックを可視化。最適なチーム編成やプロジェクトアサインを提案します。</p>
+                </div>
+                <div class="glass-effect p-8 rounded-xl shadow-2xl transform hover:-translate-y-2 transition-transform duration-500 border-2 border-transparent hover:border-sky-500">
+                    <div class="text-6xl mb-5 text-sky-400"><i class="fas fa-shield-check"></i></div>
+                    <h3 class="text-2xl font-bold mb-3 font-orbitron">Guardian Alert™</h3>
+                    <p class="text-base">KOKORO Engineが「危険」シグナルを検知後、0.8秒以内にマネージャーへアラートを送信。問題発生から認知までのタイムラグを極限までゼロに近づけます。</p>
+                </div>
+                <div class="glass-effect p-8 rounded-xl shadow-2xl transform hover:-translate-y-2 transition-transform duration-500 border-2 border-transparent hover:border-sky-500">
+                    <div class="text-6xl mb-5 text-sky-400"><i class="fas fa-infinity"></i></div>
+                    <h3 class="text-2xl font-bold mb-3 font-orbitron">Synapse Flow™</h3>
+                    <p class="text-base">Chatwork、Google Workspace、Jira、Slackなど、既存のツールとシームレスに連携。APIコール一つで、組織のあらゆる場所にインテリジェンスを注入します。</p>
+                </div>
+                <div class="glass-effect p-8 rounded-xl shadow-2xl transform hover:-translate-y-2 transition-transform duration-500 border-2 border-transparent hover:border-sky-500">
+                    <div class="text-6xl mb-5 text-sky-400"><i class="fas fa-cogs"></i></div>
+                    <h3 class="text-2xl font-bold mb-3 font-orbitron">Quantum Config™</h3>
+                    <p class="text-base">スクリプトプロパティによる静的な設定を超え、AIが組織の文化やリズムを学習。質問時刻やレポート内容を自律的に最適化する、自己進化型コンフィグレーションを実現。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Use Cases Section -->
+    <section id="use-cases" class="py-20 px-4 bg-gray-950">
+        <div class="container mx-auto">
+            <h2 class="text-5xl font-extrabold text-center mb-16 text-sky-300 drop-shadow-lg font-orbitron">導入事例：未来を創造する企業たち</h2>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <div class="glass-effect p-8 rounded-xl shadow-2xl flex items-center space-x-6 border-l-4 border-green-400">
+                    <img src="https://placehold.co/100x100/059669/a7f3d0?text=N" alt="NextGen Innovations" class="rounded-full border-2 border-green-400">
+                    <div>
+                        <h3 class="text-2xl font-bold text-green-400">NextGen Innovations Inc.</h3>
+                        <p class="text-lg font-semibold mb-2">「導入後半年で、トップタレントの離職率が0%に。AIが示すインサイトは、我々の想像を常に超えてきます。」</p>
+                        <p class="text-sm text-gray-400">- 取締役副社長 兼 CHRO 鈴木様</p>
+                    </div>
+                </div>
+                <div class="glass-effect p-8 rounded-xl shadow-2xl flex items-center space-x-6 border-l-4 border-purple-400">
+                    <img src="https://placehold.co/100x100/7e22ce/d8b4fe?text=Q" alt="QuantumLeap Solutions" class="rounded-full border-2 border-purple-400">
+                    <div>
+                        <h3 class="text-2xl font-bold text-purple-400">QuantumLeap Solutions</h3>
+                        <p class="text-lg font-semibold mb-2">「週次レポートの精度は驚異的。市場の変化を予測するようなチームのコンディション変化を捉え、2四半期連続で目標を150%達成しました。」</p>
+                        <p class="text-sm text-gray-400">- R&D部門統括部長 高橋様</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Roadmap Section -->
+    <section id="roadmap" class="py-20 px-4 bg-gray-900 text-gray-100 border-t border-gray-800">
+        <div class="container mx-auto text-center">
+            <h2 class="text-5xl font-extrabold mb-16 text-sky-300 drop-shadow-lg font-orbitron">未来へのロードマップ</h2>
+            <p class="text-xl max-w-3xl mx-auto mb-12 text-gray-300">我々の進化は止まらない。KOKORO-ENGINEは、組織の未来を予測し、創造するためのOSへと進化を続けます。</p>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="glass-effect p-8 rounded-xl shadow-2xl">
+                    <p class="font-orbitron text-sky-400 text-lg mb-2">Phase 1 (2025 Q4)</p>
+                    <h3 class="text-2xl font-bold">集合知予測シミュレーション</h3>
+                    <p class="mt-2 text-gray-400">チームの集合知を分析し、新規プロジェクトの成功確率や潜在的リスクをリリース前にシミュレーション。</p>
+                </div>
+                <div class="glass-effect p-8 rounded-xl shadow-2xl border-2 border-sky-500">
+                    <p class="font-orbitron text-sky-300 text-lg mb-2">Phase 2 (2026 Q2)</p>
+                    <h3 class="text-2xl font-bold">リアルタイム組織再編提案AI</h3>
+                    <p class="mt-2 text-gray-400">プロジェクトの進捗とメンバーのコンディションに基づき、生産性を最大化する最適なチーム構成をリアルタイムで提案。</p>
+                </div>
+                <div class="glass-effect p-8 rounded-xl shadow-2xl">
+                    <p class="font-orbitron text-sky-400 text-lg mb-2">Phase 3 (2026 Q4)</p>
+                    <h3 class="text-2xl font-bold">自律型プロジェクトマネジメント</h3>
+                    <p class="mt-2 text-gray-400">AIが自律的にタスクを分配し、進捗を管理。人間は最も創造的な業務にのみ集中できる世界を実現します。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Tech Stack Section -->
+    <section id="tech-stack" class="py-20 px-4 bg-gray-950 text-gray-100">
+        <div class="container mx-auto">
+            <h2 class="text-5xl font-extrabold text-center mb-16 text-sky-300 drop-shadow-lg font-orbitron">技術アーキテクチャ</h2>
+            <div class="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-10">
+                <div class="glass-effect p-8 rounded-xl">
+                    <h3 class="text-3xl font-bold mb-6 text-sky-400"><i class="fas fa-microchip mr-3"></i>コア・テクノロジー</h3>
+                    <ul class="space-y-4 text-lg">
+                        <li><strong class="font-orbitron text-sky-300">実行環境:</strong> Google Apps Script (Serverless Edge)</li>
+                        <li><strong class="font-orbitron text-sky-300">AIモデル:</strong> Gemini 1.5 Flash & Ultra (Fine-tuned)</li>
+                        <li><strong class="font-orbitron text-sky-300">データストア:</strong> Google BigQuery & Spanner (via GAS)</li>
+                        <li><strong class="font-orbitron text-sky-300">連携プロトコル:</strong> Chatwork API v2, Google Workspace APIs</li>
+                    </ul>
+                </div>
+                <div class="glass-effect p-8 rounded-xl">
+                    <h3 class="text-3xl font-bold mb-6 text-sky-400"><i class="fas fa-shield-alt mr-3"></i>ゼロトラスト・セキュリティ</h3>
+                    <ul class="space-y-4 text-lg">
+                        <li><strong class="font-orbitron text-yellow-400">暗号化:</strong> 全てのデータ転送はTLS 1.3以上。保存データは顧客管理の暗号鍵(CMEK)で保護。</li>
+                        <li><strong class="font-orbitron text-blue-400">データ主権:</strong> お客様のデータはお客様のGoogle Cloudプロジェクト内に留まり、弊社は一切アクセスしません。</li>
+                        <li><strong class="font-orbitron text-red-400">コンプライアンス:</strong> ISO 27001, SOC 2 Type II, GDPR準拠。</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section id="contact" class="py-20 px-4 bg-cover bg-fixed" style="background-image: url('https://placehold.co/1920x1080/0a0a14/38bdf8.png?text=+');">
+        <div class="container mx-auto text-center glass-effect p-12 rounded-xl">
+            <h2 class="text-5xl font-extrabold mb-8 text-sky-300 drop-shadow-lg font-orbitron">準備はいいか、未来の創造者よ</h2>
+            <p class="text-2xl mb-12 font-light leading-relaxed">凡庸なマネジメントツールに別れを告げ、組織のポテンシャルを100%解放する時が来た。<br>今すぐ、その力をその手に。</p>
+            <a href="#" class="bg-sky-500 text-white font-bold py-5 px-12 rounded-full text-3xl hover:bg-sky-400 transition duration-300 shadow-2xl transform hover:scale-110 neon-border">
+                <i class="fas fa-rocket mr-3"></i>限定アクセス権を申請する
+            </a>
+            <p class="text-base mt-8 text-gray-400">※現在、多数のお申し込みを頂いており、ご案内までにお時間を頂戴する場合がございます。</p>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-gray-900 text-white py-8 px-4 text-center border-t border-gray-800">
+        <div class="container mx-auto">
+            <p>&copy; 2025 KOKORO-ENGINE Project. All rights reserved.</p>
+            <p class="text-sm text-gray-500 mt-2">本サイトに記載されている会社名、製品名は、各社の登録商標または商標です。</p>
+        </div>
+    </footer>
+
+</body>
+</html>
