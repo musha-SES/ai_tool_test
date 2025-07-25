@@ -413,11 +413,20 @@ function assessAndNotify(reportData, managerName, managerRoomId) {
     Logger.log('Gemini API呼び出しまたは応答解析に失敗: ' + error.message);
   }
 
-  if (geminiStatus === CONFIG.STATUS_STRINGS.DANGER || geminiStatus === CONFIG.STATUS_STRINGS.WARNING) {
+  if (geminiStatus === CONFIG.STATUS_STRINGS.DANGER || 
+      geminiStatus === CONFIG.STATUS_STRINGS.WARNING ||
+      geminiStatus === CONFIG.STATUS_STRINGS.BAD ||
+      (geminiStatus === CONFIG.STATUS_STRINGS.NORMAL && reportData.problems !== CONFIG.DEFAULT_VALUES.NO_PROBLEM)) {
     if (!managerRoomId) {
       Logger.log("マネージャーのChatworkルームIDが不明なため、通知をスキップします。");
     } else {
-      const subject = CONFIG.DAILY_REPORT_ALERT_SUBJECT_TEMPLATE.replace('{employeeName}', reportData.name);
+      let subject = CONFIG.DAILY_REPORT_ALERT_SUBJECT_TEMPLATE.replace('{employeeName}', reportData.name);
+      if (geminiStatus === CONFIG.STATUS_STRINGS.NORMAL) {
+        subject = `【情報】日報から困りごとの報告 - ${reportData.name}`;
+      } else if (geminiStatus === CONFIG.STATUS_STRINGS.BAD) {
+        subject = `【要確認】日報で「悪い」評価 - ${reportData.name}`;
+      }
+
       const body = CONFIG.DAILY_REPORT_ALERT_BODY_TEMPLATE
         .replace('{subject}', subject)
         .replace('{employeeName}', reportData.name)

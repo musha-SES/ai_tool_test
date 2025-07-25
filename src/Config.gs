@@ -38,6 +38,8 @@ const CONFIG = {
     ERROR_PREFIX: 'エラー発生',
     DANGER: '危険',
     WARNING: '少し悪い',
+    BAD: '悪い',
+    NORMAL: '普通',
   },
 
   // 気分選択肢
