@@ -459,30 +459,54 @@ function assessAndNotify(reportData, managerName, managerRoomId, employeeRoomId)
  * @param {string} managerName マネージャー名
  */
 function logReportToSheet(reportData, status, reason, managerName, employeeRoomId) {
-  const sheetName = `${reportData.name}_${employeeRoomId}`;
-  let sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
-  if (!sheet) {
-    sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(sheetName);
-    const headers = ['タイムスタンプ', '氏名', 'マネージャー名', '日報日付', '今日の業務内容', '今日の気分', '困っていること', 'AI評価状態', 'AI評価理由'];
-    sheet.appendRow(headers);
-    CONFIG.DAILY_REPORT_LOG_COLUMN_WIDTHS.forEach(col => {
-      sheet.setColumnWidth(col.index, col.width);
-    });
-    sheet.getRange(1, 1, 1, headers.length).setBackground(CONFIG.DAILY_REPORT_LOG_HEADER_BG_COLOR);
-    sheet.setFrozenRows(1); // 1行目を固定
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+
+  // A. メインの「日報ログ」シートへの書き込み
+  const mainLogSheet = spreadsheet.getSheetByName(CONFIG.DAILY_REPORT_LOG_SHEET_NAME);
+  if (!mainLogSheet) {
+    throw new Error(`シート「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」が見つかりません。`);
   }
-  sheet.appendRow([
-    new Date(),           // タイムスタンプ
-    reportData.name,      // 氏名
-    managerName || CONFIG.DEFAULT_VALUES.NOT_APPLICABLE, // マネージャー名
-    reportData.date,      // 日報日付
+  mainLogSheet.appendRow([
+    new Date(),
+    reportData.name,
+    managerName || CONFIG.DEFAULT_VALUES.NOT_APPLICABLE,
+    reportData.date,
     reportData.workContent,
     reportData.mood,
     reportData.problems,
     status,
     reason
   ]);
-  Logger.log(`日報データを「${sheetName}」シートに記録しました。`);
+  Logger.log(`日報データを「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」シートに記録しました。`);
+
+  // B. メンバーごとの「個別日報ログ」シートへの書き込み
+  const memberSheetName = `${reportData.name}_${employeeRoomId}`;
+  let memberSheet = spreadsheet.getSheetByName(memberSheetName);
+
+  if (!memberSheet) {
+    memberSheet = spreadsheet.insertSheet(memberSheetName);
+    memberSheet.appendRow(CONFIG.MEMBER_DAILY_REPORT_LOG_HEADERS);
+
+    // 列幅とヘッダー色の設定
+    CONFIG.DAILY_REPORT_LOG_COLUMN_WIDTHS.forEach(col => {
+      if (col.index <= CONFIG.MEMBER_DAILY_REPORT_LOG_HEADERS.length) {
+        memberSheet.setColumnWidth(col.index, col.width);
+      }
+    });
+    memberSheet.getRange(1, 1, 1, CONFIG.MEMBER_DAILY_REPORT_LOG_HEADERS.length).setBackground(CONFIG.DAILY_REPORT_LOG_HEADER_BG_COLOR);
+    memberSheet.setFrozenRows(1); // 1行目を固定
+  }
+
+  memberSheet.appendRow([
+    new Date(),
+    reportData.name,
+    managerName || CONFIG.DEFAULT_VALUES.NOT_APPLICABLE,
+    reportData.date,
+    reportData.workContent,
+    reportData.mood,
+    reportData.problems
+  ]);
+  Logger.log(`日報データを「${memberSheetName}」シートに記録しました。`);
 }
 
 /**
@@ -640,11 +664,10 @@ function callGeminiApi(prompt) {
  * @returns {string} 要約された日報ログのテキスト
  */
 function getDailyReportDataForEmployee(employeeName, employeeRoomId) {
-  const sheetName = `${employeeName}_${employeeRoomId}`;
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DAILY_REPORT_LOG_SHEET_NAME);
   if (!sheet) {
-    Logger.log(`シート「${sheetName}」が見つかりません。`);
-    return [];
+    Logger.log(`シート「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」が見つかりません。`);
+    return '日報ログが見つかりませんでした。';
   }
 
   const values = sheet.getDataRange().getValues();
@@ -1196,10 +1219,9 @@ function generateWeeklyReports() {
  * @returns {Array<Object>} 過去1週間分の日報データ（オブジェクトの配列）
  */
 function getWeeklyRawReports(employeeName, employeeRoomId) {
-  const sheetName = `${employeeName}_${employeeRoomId}`;
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DAILY_REPORT_LOG_SHEET_NAME);
   if (!sheet) {
-    Logger.log(`シート「${sheetName}」が見つかりません。`);
+    Logger.log(`シート「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」が見つかりません。`);
     return [];
   }
 
@@ -1250,41 +1272,41 @@ function getWeeklyRawReports(employeeName, employeeRoomId) {
  * @returns {Object|null} 集計データ
  */
 function getWeeklyTeamReportSummaryForGroup(employees) {
-  const weeklyReports = [];
-  employees.forEach(employee => {
-    const sheetName = `${employee.employeeName}_${employee.employeeRoomId}`;
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
-    if (!sheet) {
-      Logger.log(`シート「${sheetName}」が見つかりません。`);
-      return;
-    }
-    const values = sheet.getDataRange().getValues();
-    if (values.length <= 1) {
-      return;
-    }
-    const header = values[0];
-    const dataRows = values.slice(1);
-    const headerMap = header.reduce((acc, col, index) => ({ ...acc, [col]: index }), {});
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DAILY_REPORT_LOG_SHEET_NAME);
+  if (!sheet) {
+    Logger.log(`シート「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」が見つかりません。`);
+    return null;
+  }
 
-    const nameCol = headerMap['氏名'];
-    const dateCol = headerMap['タイムスタンプ']; // Use timestamp for filtering
-    const moodCol = headerMap['今日の気分'];
-    const problemsCol = headerMap['困っていること'];
-    const workContentCol = headerMap['今日の業務内容'];
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) {
+    Logger.log('日報ログがありません。');
+    return null;
+  }
 
-    if (nameCol === undefined || dateCol === undefined || moodCol === undefined || problemsCol === undefined || workContentCol === undefined) {
-      Logger.log(`日報ログシート「${sheetName}」のヘッダーが不正です。必要な列が見つかりません。`);
-      return;
-    }
+  const header = values[0];
+  const dataRows = values.slice(1);
+  const headerMap = header.reduce((acc, col, index) => ({ ...acc, [col]: index }), {});
 
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - CONFIG.WEEKLY_REPORT_FETCH_DAYS);
+  const nameCol = headerMap['氏名'];
+  const dateCol = headerMap['タイムスタンプ']; // Use timestamp for filtering
+  const moodCol = headerMap['今日の気分'];
+  const problemsCol = headerMap['困っていること'];
+  const workContentCol = headerMap['今日の業務内容'];
 
-    const employeeWeeklyReports = dataRows.filter(row => {
-      const reportDate = row[dateCol] ? new Date(row[dateCol]) : null;
-      return reportDate && reportDate >= oneWeekAgo;
-    });
-    weeklyReports.push(...employeeWeeklyReports);
+  if (nameCol === undefined || dateCol === undefined || moodCol === undefined || problemsCol === undefined || workContentCol === undefined) {
+    Logger.log('日報ログシートのヘッダーが不正です。必要な列が見つかりません。');
+    return null;
+  }
+
+  const oneWeekAgo = new Date();
+  oneWeekAgo.setDate(oneWeekAgo.getDate() - CONFIG.WEEKLY_REPORT_FETCH_DAYS);
+
+  const employeeNames = employees.map(e => e.employeeName);
+  const weeklyReports = dataRows.filter(row => {
+    const reportName = row[nameCol] ? row[nameCol].toString().trim() : '';
+    const reportDate = row[dateCol] ? new Date(row[dateCol]) : null;
+    return employeeNames.includes(reportName) && reportDate && reportDate >= oneWeekAgo;
   });
 
   if (weeklyReports.length === 0) {

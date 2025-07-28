@@ -1,8 +1,12 @@
 const CONFIG = {
   // シート名
   BOT_QUESTION_LOG_SHEET_NAME: 'BOT質問ログ',
-  
+  DAILY_REPORT_LOG_SHEET_NAME: '日報ログ',
   CHATWORK_SETTINGS_SHEET_NAME: 'Chatwork設定',
+
+  // メンバーごとの日報ログシート
+  
+  MEMBER_DAILY_REPORT_LOG_HEADERS: ['タイムスタンプ', '氏名', 'マネージャー', '日報日付', '今日の業務内容', '今日の気分', '困っていること'],
 
   // 日報・レポート関連
   DAILY_REPORT_LOG_FETCH_DAYS_FOR_1ON1: 365, // 1on1用日報ログ取得日数
