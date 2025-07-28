@@ -484,7 +484,8 @@ function logReportToSheet(reportData, status, reason, managerName, employeeRoomI
   let memberSheet = spreadsheet.getSheetByName(memberSheetName);
 
   if (!memberSheet) {
-    memberSheet = spreadsheet.insertSheet(memberSheetName);
+    const sheetIndex = spreadsheet.getSheets().length;
+    memberSheet = spreadsheet.insertSheet(memberSheetName, sheetIndex);
     memberSheet.appendRow(CONFIG.MEMBER_DAILY_REPORT_LOG_HEADERS);
 
     // 列幅とヘッダー色の設定
