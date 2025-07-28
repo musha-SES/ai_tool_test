@@ -192,6 +192,8 @@
         </ul>
 
         <h2>1. 日報の収集・分析サイクル（日次自動実行）</h2>
+
+        <h3>1.1. 日報質問の送信</h3>
         <div class="flowchart">
             <div class="flow-step">
                 <div class="node">時間トリガー (設定可能)</div>
@@ -216,8 +218,10 @@
                 <div class="node actor">社員 (Employee)</div>
                 <div class="description">(D) 日報を返信する</div>
             </div>
-            <div class="flow-connector"></div>
+        </div>
 
+        <h3>1.2. 日報返信の収集・分析</h3>
+        <div class="flowchart">
             <div class="flow-step">
                 <div class="node">時間トリガー (設定可能)</div>
                 <div class="description">(E) processChatworkReplies 実行</div>
