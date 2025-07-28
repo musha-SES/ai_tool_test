@@ -465,6 +465,11 @@ function logReportToSheet(reportData, status, reason, managerName, employeeRoomI
     sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(sheetName);
     const headers = ['タイムスタンプ', '氏名', 'マネージャー名', '日報日付', '今日の業務内容', '今日の気分', '困っていること', 'AI評価状態', 'AI評価理由'];
     sheet.appendRow(headers);
+    CONFIG.DAILY_REPORT_LOG_COLUMN_WIDTHS.forEach(col => {
+      sheet.setColumnWidth(col.index, col.width);
+    });
+    sheet.getRange(1, 1, 1, headers.length).setBackground(CONFIG.DAILY_REPORT_LOG_HEADER_BG_COLOR);
+    sheet.setFrozenRows(1); // 1行目を固定
   }
   sheet.appendRow([
     new Date(),           // タイムスタンプ

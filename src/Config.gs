@@ -96,6 +96,20 @@ const CONFIG = {
     TEAM: 'team' 
   },
 
+  // 日報ログシートのフォーマット
+  DAILY_REPORT_LOG_COLUMN_WIDTHS: [
+    { index: 1, width: 125 }, // A列: タイムスタンプ
+    { index: 2, width: 100 }, // B列: 氏名
+    { index: 3, width: 100 }, // C列: マネージャー
+    { index: 4, width: 100 }, // D列: 日報日付
+    { index: 5, width: 300 }, // E列: 今日の業務内容
+    { index: 6, width: 100 }, // F列: 今日の気分
+    { index: 7, width: 430 }, // G列: 困っていること
+    { index: 8, width: 100 }, // H列: AI評価状態
+    { index: 9, width: 850 }  // I列: AI評価理由
+  ],
+  DAILY_REPORT_LOG_HEADER_BG_COLOR: '#A4C2F4', // 明るいコーンフラワー ブルー 3
+
   // --- 正規表現 ---
   CHATWORK_REPLY_REGEX: /\[rp aid=(\d+) to=(\d+)-(\d+)\]/,
   PARSE_REPORT_REGEX: {
