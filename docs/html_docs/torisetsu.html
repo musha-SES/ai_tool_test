@@ -27,7 +27,7 @@
 <h3>STEP 1: Chatwork APIキーの準備</h3>
 
 <p>Chatwork APIを利用するために、APIキーを発行する必要があります。
-管理者権限を持つアカウントでChatworkにログインし、<a href="https://www.chatwork.com/service/packages/chatwork/subpackages/api/token.php">API設定</a>からAPIトークンを発行してください。発行したAPIキーは安全な場所に保管してください。取得したAPIキーに紐づくアカウントがBOTの役割を持つことになります。</p>
+管理者権限を持つアカウントでChatworkにログインし、<a href="https://www.chatwork.com/service/packages/chatwork/subpackages/api/token.php">API設定</a>からAPIトークンを発行してください。発行したAPIキーは安全な場所に保管してください。<strong>ここでAPIキーを発行したChatworkアカウントが、当ツールにおける「BOT」として動作し、日報の質問送信などを自動で行います。</strong></p>
 
 <h3>STEP 2: スプレッドシートの準備とコードの配置</h3>
 
@@ -47,7 +47,7 @@
 <ul>
 <li><strong>グループ名</strong>: マネージャーと社員を紐付けるための名前です（例: <code>営業チーム</code>）。</li>
 <li><strong>氏名</strong>: ユーザーのフルネームを記入します。</li>
-<li><strong>ルームID</strong>: ChatworkのルームIDを記入します。ダイレクトメッセージのルームIDは、URLの<code>#!rid</code>以降の数字です。</li>
+<li><strong>ルームID</strong>: <strong>BOTと各ユーザー（社員・マネージャー）間のダイレクトメッセージのルームID</strong>を記入します。ルームIDは、Chatworkで対象のDMを開いた際のURLに含まれる<code>#!rid</code>以降の数字です。</li>
 <li><strong>役割</strong>: <code>manager</code> または <code>employee</code> のいずれかを小文字で入力します。</li>
 <li><strong>週次レポートモード</strong>: <code>manager</code>の行に設定します。<code>team</code>と入力するとチーム全体の要約レポート、<code>individual</code>と入力するとメンバーごとの日報をまとめたレポートが通知されます。<strong>空欄の場合は<code>individual</code>として動作します。</strong></li>
 </ul>
