@@ -1,7 +1,7 @@
 const CONFIG = {
   // シート名
   BOT_QUESTION_LOG_SHEET_NAME: 'BOT質問ログ',
-  DAILY_REPORT_LOG_SHEET_NAME: '日報ログ',
+  
   CHATWORK_SETTINGS_SHEET_NAME: 'Chatwork設定',
 
   // 日報・レポート関連
