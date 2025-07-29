@@ -226,6 +226,15 @@ function getChatworkTargetRoomIds() {
  * 全ての部下に日報提出を促す質問をChatworkで送信する。
  */
 function sendDailyReportQuestions() {
+  // Chatwork APIキーの事前チェック
+  try {
+    getChatworkApiKey();
+  } catch (e) {
+    Logger.log(`日報質問送信処理をスキップしました: ${e.message}`);
+    SpreadsheetApp.getUi().alert('エラー', `日報質問送信処理をスキップしました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
   const employeeList = getChatworkTargetRoomIds();
   const pendingQuestions = getPendingQuestionMessages();
 
@@ -267,6 +276,15 @@ function sendDailyReportQuestions() {
  * Chatworkの返信を収集し、日報として解析・評価する。
  */
 function processChatworkReplies() {
+  // Chatwork APIキーの事前チェック
+  try {
+    getChatworkApiKey();
+  } catch (e) {
+    Logger.log(`Chatwork日報取得・分析処理をスキップしました: ${e.message}`);
+    SpreadsheetApp.getUi().alert('エラー', `Chatwork日報取得・分析処理をスキップしました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
   const employeeList = getChatworkTargetRoomIds();
   const botAccountId = getBotChatworkAccountId();
   const pendingQuestions = getPendingQuestionMessages();
@@ -312,6 +330,7 @@ function processChatworkReplies() {
                 updateQuestionStatus(employeeRoomId, matchedQuestion.messageId, CONFIG.STATUS_STRINGS.SUCCESS);
               } catch (e) {
                 Logger.log(`日報処理中にエラーが発生しました: ${e.message}`);
+                // logReportToSheetからのエラーもここで捕捉し、ステータスを更新
                 updateQuestionStatus(employeeRoomId, matchedQuestion.messageId, CONFIG.STATUS_STRINGS.ERROR_GENERAL, e.message);
               }
             } else {
@@ -412,17 +431,22 @@ function assessAndNotify(reportData, managerName, managerRoomId, employeeRoomId)
     Logger.log('Gemini API呼び出しまたは応答解析に失敗: ' + error.message);
   }
 
+  try {
+    logReportToSheet(reportData, geminiStatus, geminiReason, managerName, employeeRoomId);
+  } catch (e) {
+    Logger.log('スプレッドシートへの日報ログ記録に失敗しました: ' + e.message);
+    // エラーを再スローして、呼び出し元で適切に処理できるようにする
+    throw e;
+  }
+
   if (geminiStatus === CONFIG.STATUS_STRINGS.DANGER || 
       geminiStatus === CONFIG.STATUS_STRINGS.WARNING ||
-      geminiStatus === CONFIG.STATUS_STRINGS.BAD ||
-      (geminiStatus === CONFIG.STATUS_STRINGS.NORMAL && reportData.problems !== CONFIG.DEFAULT_VALUES.NO_PROBLEM)) {
+      geminiStatus === CONFIG.STATUS_STRINGS.BAD) {
     if (!managerRoomId) {
       Logger.log("マネージャーのChatworkルームIDが不明なため、通知をスキップします。");
     } else {
       let subject = CONFIG.DAILY_REPORT_ALERT_SUBJECT_TEMPLATE.replace('{employeeName}', reportData.name);
-      if (geminiStatus === CONFIG.STATUS_STRINGS.NORMAL) {
-        subject = `【情報】日報から困りごとの報告 - ${reportData.name}`;
-      } else if (geminiStatus === CONFIG.STATUS_STRINGS.BAD) {
+      if (geminiStatus === CONFIG.STATUS_STRINGS.BAD) {
         subject = `【要確認】日報で「悪い」評価 - ${reportData.name}`;
       }
 
@@ -441,12 +465,6 @@ function assessAndNotify(reportData, managerName, managerRoomId, employeeRoomId)
         Logger.log('Chatworkへの注意通知の送信に失敗しました: ' + e.message);
       }
     }
-  }
-  
-  try {
-    logReportToSheet(reportData, geminiStatus, geminiReason, managerName, employeeRoomId);
-  } catch (e) {
-    Logger.log('スプレッドシートへの日報ログ記録に失敗しました: ' + e.message);
   }
 }
 
@@ -683,9 +701,9 @@ function generateWeeklyReports() {
 
   try {
     const employeeList = getChatworkTargetRoomIds();
-    const managersToProcess = {}; // Key: managerRoomId, Value: { managerName, managerRoomId, weeklyReportMode, groupName, employees: [] }
+    const managersToProcess = {}; // Key: `${managerRoomId}_${groupName}`, Value: { managerName, managerRoomId, weeklyReportMode, groupName, employees: [] }
 
-    // マネージャーごとに社員をグループ化
+    // マネージャーとグループごとに社員をグループ化
     employeeList.forEach(employee => {
       const { employeeName, employeeRoomId, managerName, managerRoomId, weeklyReportMode, group, role } = employee;
 
@@ -694,8 +712,9 @@ function generateWeeklyReports() {
         return;
       }
 
-      if (!managersToProcess[managerRoomId]) {
-        managersToProcess[managerRoomId] = {
+      const managerGroupKey = `${managerRoomId}_${group}`;
+      if (!managersToProcess[managerGroupKey]) {
+        managersToProcess[managerGroupKey] = {
           name: managerName,
           roomId: managerRoomId,
           weeklyReportMode: weeklyReportMode,
@@ -703,12 +722,12 @@ function generateWeeklyReports() {
           employees: []
         };
       }
-      managersToProcess[managerRoomId].employees.push({ employeeName, employeeRoomId, role });
+      managersToProcess[managerGroupKey].employees.push({ employeeName, employeeRoomId, role });
     });
 
     // 各マネージャー/グループに対してレポートを生成
-    for (const managerRoomId in managersToProcess) {
-      const managerData = managersToProcess[managerRoomId];
+    for (const managerGroupKey in managersToProcess) {
+      const managerData = managersToProcess[managerGroupKey];
       const today = new Date();
       const subjectDate = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}`;
 
@@ -877,7 +896,7 @@ function getWeeklyTeamReportSummaryForGroup(employees) {
   const oneWeekAgo = new Date();
   oneWeekAgo.setDate(oneWeekAgo.getDate() - CONFIG.WEEKLY_REPORT_FETCH_DAYS);
 
-  const employeeNames = employees.map(e => e.employeeName);
+  const employeeNames = employees;
   const weeklyReports = dataRows.filter(row => {
     const reportName = row[nameCol] ? row[nameCol].toString().trim() : '';
     const reportDate = row[dateCol] ? new Date(row[dateCol]) : null;
