@@ -103,8 +103,6 @@ const CONFIG = {
     { index: 5, width: 300 }, // E列: 今日の業務内容
     { index: 6, width: 100 }, // F列: 今日の気分
     { index: 7, width: 430 }, // G列: 困っていること
-    { index: 8, width: 100 }, // H列: AI評価状態
-    { index: 9, width: 850 }  // I列: AI評価理由
   ],
   DAILY_REPORT_LOG_HEADER_BG_COLOR: '#A4C2F4', // 明るいコーンフラワー ブルー 3
 
