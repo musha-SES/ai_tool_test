@@ -12,7 +12,7 @@
 
 <h2>1. 概要</h2>
 
-<p>本ツールは、Google Apps Script (GAS) を用いて、Chatwork経由での日報収集、Gemini APIによる内容分析、分析結果に基づいたアラート通知、および全データのスプレッドシートへのログ記録を自動化するシステムである。また、蓄積された日報データと自己評価シートを基に、1on1面談のヒアリング項目を自動生成する機能も有する。</p>
+<p>本ツールは、Google Apps Script (GAS) を用いて、Chatwork経由での日報収集、Gemini APIによる内容分析、分析結果に基づいたアラート通知、および全データのスプレッドシートへのログ記録を自動化するシステムである。</p>
 
 <h2>2. 機能要件</h2>
 
@@ -35,7 +35,7 @@
 <li><strong>要件</strong>: 定期的に全社員へ日報提出を促すメッセージを送信できること。</li>
 <li><strong>仕様</strong>:
 <ul>
-<li><strong>トリガー</strong>: 日次（時刻は<code>CONFIG</code>で設定可能）の自動トリガー、またはスプレッドシートのカスタムメニューからの手動実行。
+<li><strong>トリガー</strong>: 日次（時刻はスクリプトプロパティで設定可能）の自動トリガー、またはスプレッドシートのカスタムメニューからの手動実行。</li>
 Apps Scriptの時限トリガーは、設定時刻の前後15分程度の範囲内で実行される可能性があり、正確な時刻の実行は保証されません（Googleのサーバー負荷による仕様）。</li>
 <li><strong>処理</strong>:
 <ol>
@@ -55,18 +55,18 @@ Apps Scriptの時限トリガーは、設定時刻の前後15分程度の範囲�
 <li><strong>要件</strong>: 社員から提出された日報を解析し、内容に応じてマネージャーへ通知できること。</li>
 <li><strong>仕様</strong>:
 <ul>
-<li><strong>トリガー</strong>: 日次（時刻は<code>CONFIG</code>で設定可能）の自動トリガー、または手動実行。</li>
+<li><strong>トリガー</strong>: 日次（時刻はスクリプトプロパティで設定可能）の自動トリガー、またはスプレッドシートのカスタムメニューからの手動実行。</li>
 <li><strong>処理</strong>:
 <ol>
 <li><code>BOT質問ログ</code>シートから、ステータスが<code>返信済み_処理成功</code>以外の質問を取得する。</li>
-<li>対象のChatworkルームから最新50件のメッセージを取得する。</li>
+<li>対象のChatworkルームから最新50件のメッセージを取得する。この件数は固定値であり、変更はできません。</li>
 <li>BOTが送信した質問への返信（リプライ）形式のメッセージを特定する。</li>
 <li>メッセージ本文に<code>#日報</code>タグが含まれていることを確認する。</li>
 <li>メッセージ本文から「業務内容」「気分」「困っていること」を正規表現で抽出する。</li>
 <li><strong>バリデーション</strong>:
 <ul>
 <li>業務内容が空でないこと。</li>
-<li>気分が<code>CONFIG.MOOD_OPTIONS</code>で定義された選択肢のいずれかであること。</li>
+<li>気分が設定された選択肢のいずれかであること。</li>
 <li>バリデーション失敗時は、<code>BOT質問ログ</code>のステータスを<code>返信済み_フォーマット不正</code>とし、処理をスキップする。</li>
 </ul>
 </li>
@@ -78,12 +78,12 @@ Apps Scriptの時限トリガーは、設定時刻の前後15分程度の範囲�
 </li>
 <li><strong>アラート通知</strong>:
 <ul>
-<li>AIの評価が<code>危険</code>、<code>少し悪い</code>、<code>悪い</code>のいずれかの場合、または評価が<code>普通</code>で「困っていること」が<code>特になし</code>以外の場合、担当マネージャーのChatworkルームにアラートメッセージを送信する。</li>
+<li>AIの評価が<code>危険</code>、<code>少し悪い</code>、<code>悪い</code>のいずれかの場合、担当マネージャーのChatworkルームにアラートメッセージを送信する。</li>
 </ul>
 </li>
 <li><strong>ログ記録</strong>:
 <ul>
-<li>分析された全ての日報データ、AIの評価結果、担当マネージャー名を<code>日報ログ</code>シートに記録する。</li>
+<li>分析された全ての日報データ、AIの評価結果、担当マネージャー名を<code>日報ログ</code>シートに記録する。また、メンバーごとの個別日報ログシートを作成し、そこに日報データを記録する。</li>
 <li><code>BOT質問ログ</code>のステータスを<code>返信済み_処理成功</code>または<code>エラー発生</code>に更新する。</li>
 </ul>
 </li>
@@ -93,35 +93,7 @@ Apps Scriptの時限トリガーは、設定時刻の前後15分程度の範囲�
 </li>
 </ul>
 
-<h3>2.4. 1on1ヒアリング項目生成機能</h3>
 
-<ul>
-<li><strong>要件</strong>: 特定の社員の過去の活動記録に基づき、1on1面談で議論すべきトピックをAIが提案できること。</li>
-<li><strong>仕様</strong>:
-<ul>
-<li><strong>トリガー</strong>: スプレッドシートのカスタムメニューからの手動実行。</li>
-<li><strong>対象者指定</strong>: スクリプトプロパティ <code>TARGET_EMPLOYEE_NAME_FOR_1ON1</code> で対象社員の氏名を指定する。</li>
-<li><strong>データ収集</strong>:
-<ol>
-<li><strong>日報ログ</strong>: <code>日報ログ</code>シートから、対象社員の過去<code>CONFIG.DAILY_REPORT_LOG_FETCH_DAYS_FOR_1ON1</code>日分の全日報を取得し、気分の傾向、頻出する課題キーワード、ポジティブな活動（新規機能リリース、顧客高評価、業務改善、目標達成など）などを集計・要約する。特にAI評価が「危険」または「少し悪い」の日報、および月ごとの代表的な日報を優先的に抜粋する。</li>
-<li><strong>自己評価</strong>: Googleドライブの指定フォルダ（IDはスクリプトプロパティで指定）から、対象社員の「自己評価シート」を検索し、評価項目の内容やコメントを抽出する。</li>
-</ol>
-</li>
-<li><strong>AIによる項目生成</strong>:
-<ol>
-<li>日報サマリーと自己評価データを埋め込んだ、詳細なプロンプトを生成する。プロンプトには、回答フォーマット（質問と根拠をペアで記述）を厳密に指定する。</li>
-<li>Gemini APIを呼び出し、ヒアリング項目を5つ生成させる。</li>
-</ol>
-</li>
-<li><strong>結果通知</strong>:
-<ol>
-<li>APIの応答を、対象社員の担当マネージャーのChatworkルームにそのまま通知する。</li>
-
-</ol>
-</li>
-</ul>
-</li>
-</ul>
 
 <h3>2.5. 週次レポート生成機能</h3>
 
@@ -135,7 +107,7 @@ Apps Scriptの時限トリガーは、設定時刻の前後15分程度の範囲�
 <li>システムは、Chatwork設定シートからマネージャーと社員の情報を取得し、マネージャーごとに担当社員をグループ化します。</li>
 <li>各マネージャーに設定された週次レポートモード（個人別またはチーム全体）に基づき、以下の処理を行います。
 <ul>
-<li><strong>個人別モードの場合</strong>: 各担当社員の過去1週間分の日報データを収集し、個別のコンディションレポートを生成します。これらのレポートを結合し、担当マネージャーに通知します。</li>
+<li><strong>個人別モードの場合</strong>: 各担当社員の過去1週間分の日報データを収集し、個別のコンディションサマリーを生成します。これらのサマリーを結合し、担当マネージャーに通知します。</li>
 <li><strong>チーム全体モードの場合</strong>: 担当社員全員の過去1週間分の日報データを集計し、チーム全体のコンディションサマリーを生成します。このサマリーを、担当マネージャーに通知します。</li>
 </ul>
 </li>
@@ -159,6 +131,12 @@ Apps Scriptの時限トリガーは、設定時刻の前後15分程度の範囲�
 
 <table><thead><tr><th>列</th><th>ヘッダー名</th><th>説明</th><th>データ型</th></tr></thead><tbody><tr><td>A</td><td>ルームID</td><td>質問を送信したChatworkのルームID</td><td>String</td></tr><tr><td>B</td><td>質問ID</td><td>送信した質問メッセージのID</td><td>String</td></tr><tr><td>C</td><td>送信日時</td><td>質問を送信した日時</td><td>Datetime</td></tr><tr><td>D</td><td>ステータス</td><td><code>未返信</code>, <code>返信済み_処理成功</code>, <code>返信済み_フォーマット不正</code>, <code>エラー発生_...</code>など</td><td>String</td></tr><tr><td>E</td><td>エラー詳細</td><td>エラー発生時の詳細情報</td><td>String</td></tr></tbody></table>
 
+<h3>3.4. メンバー別日報ログシート</h3>
+
+<p>シート名は<code>【日報ログ】メンバー名</code>の形式で、日報が初めて記録される際に自動的に作成されます。</p>
+
+<table><thead><tr><th>列</th><th>ヘッダー名</th><th>説明</th><th>データ型</th></tr></thead><tbody><tr><td>A</td><td>タイムスタンプ</td><td>ログが記録された日時</td><td>Datetime</td></tr><tr><td>B</td><td>日報日付</td><td>日報の対象日</td><td>Datetime</td></tr><tr><td>C</td><td>今日の業務内容</td><td>日報から抽出した業務内容</td><td>String</td></tr><tr><td>D</td><td>今日の気分</td><td>日報から抽出した気分</td><td>String</td></tr><tr><td>E</td><td>困っていること</td><td>日報から抽出した困っていること</td><td>String</td></tr></tbody></table>
+
 <h2>4. 外部連携API</h2>
 
 <ul>
@@ -170,13 +148,13 @@ Apps Scriptの時限トリガーは、設定時刻の前後15分程度の範囲�
 </li>
 <li><strong>Google Gemini API (v1beta)</strong>
 <ul>
-<li><code>/models/gemini-2.0-flash:generateContent</code>: 日報分析と1on1トピック生成のコアロジックで使用。</li>
+<li><code>/models/gemini-2.0-flash:generateContent</code>: 日報分析のコアロジックで使用。</li>
 </ul>
 </li>
 </ul>
 
 <hr>
-<p>最終更新日: 2025/07/17</p>
+<p>最終更新日: 2025/07/29</p>
     </div>
 </body>
 </html>
