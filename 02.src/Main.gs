@@ -11,8 +11,7 @@ function onOpen() {
     .addSeparator()
     .addItem('定期実行トリガーを設定', 'createDailyTriggers')
     .addItem('全てのトリガーを削除', 'deleteTriggers')
-    .addSeparator()
-    .addItem('1on1ヒアリング項目生成', 'generate1on1Topics')
+    
     .addToUi();
 }
 
@@ -227,6 +226,15 @@ function getChatworkTargetRoomIds() {
  * 全ての部下に日報提出を促す質問をChatworkで送信する。
  */
 function sendDailyReportQuestions() {
+  // Chatwork APIキーの事前チェック
+  try {
+    getChatworkApiKey();
+  } catch (e) {
+    Logger.log(`日報質問送信処理をスキップしました: ${e.message}`);
+    SpreadsheetApp.getUi().alert('エラー', `日報質問送信処理をスキップしました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
   const employeeList = getChatworkTargetRoomIds();
   const pendingQuestions = getPendingQuestionMessages();
 
@@ -268,6 +276,15 @@ function sendDailyReportQuestions() {
  * Chatworkの返信を収集し、日報として解析・評価する。
  */
 function processChatworkReplies() {
+  // Chatwork APIキーの事前チェック
+  try {
+    getChatworkApiKey();
+  } catch (e) {
+    Logger.log(`Chatwork日報取得・分析処理をスキップしました: ${e.message}`);
+    SpreadsheetApp.getUi().alert('エラー', `Chatwork日報取得・分析処理をスキップしました: ${e.message}`, SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
   const employeeList = getChatworkTargetRoomIds();
   const botAccountId = getBotChatworkAccountId();
   const pendingQuestions = getPendingQuestionMessages();
@@ -309,10 +326,11 @@ function processChatworkReplies() {
 
             if (validationResult.isValid) {
               try {
-                assessAndNotify(reportData, managerName, managerRoomId);
+                assessAndNotify(reportData, managerName, managerRoomId, employee.employeeRoomId);
                 updateQuestionStatus(employeeRoomId, matchedQuestion.messageId, CONFIG.STATUS_STRINGS.SUCCESS);
               } catch (e) {
                 Logger.log(`日報処理中にエラーが発生しました: ${e.message}`);
+                // logReportToSheetからのエラーもここで捕捉し、ステータスを更新
                 updateQuestionStatus(employeeRoomId, matchedQuestion.messageId, CONFIG.STATUS_STRINGS.ERROR_GENERAL, e.message);
               }
             } else {
@@ -389,7 +407,7 @@ function validateDailyReport(reportData) {
  * @param {string} managerName マネージャー名
  * @param {string} managerRoomId マネージャーのルームID
  */
-function assessAndNotify(reportData, managerName, managerRoomId) {
+function assessAndNotify(reportData, managerName, managerRoomId, employeeRoomId) {
   const geminiPrompt = CONFIG.DAILY_REPORT_ASSESS_PROMPT_TEMPLATE
     .replace('{workContent}', reportData.workContent)
     .replace('{mood}', reportData.mood)
@@ -413,17 +431,22 @@ function assessAndNotify(reportData, managerName, managerRoomId) {
     Logger.log('Gemini API呼び出しまたは応答解析に失敗: ' + error.message);
   }
 
+  try {
+    logReportToSheet(reportData, geminiStatus, geminiReason, managerName, employeeRoomId);
+  } catch (e) {
+    Logger.log('スプレッドシートへの日報ログ記録に失敗しました: ' + e.message);
+    // エラーを再スローして、呼び出し元で適切に処理できるようにする
+    throw e;
+  }
+
   if (geminiStatus === CONFIG.STATUS_STRINGS.DANGER || 
       geminiStatus === CONFIG.STATUS_STRINGS.WARNING ||
-      geminiStatus === CONFIG.STATUS_STRINGS.BAD ||
-      (geminiStatus === CONFIG.STATUS_STRINGS.NORMAL && reportData.problems !== CONFIG.DEFAULT_VALUES.NO_PROBLEM)) {
+      geminiStatus === CONFIG.STATUS_STRINGS.BAD) {
     if (!managerRoomId) {
       Logger.log("マネージャーのChatworkルームIDが不明なため、通知をスキップします。");
     } else {
       let subject = CONFIG.DAILY_REPORT_ALERT_SUBJECT_TEMPLATE.replace('{employeeName}', reportData.name);
-      if (geminiStatus === CONFIG.STATUS_STRINGS.NORMAL) {
-        subject = `【情報】日報から困りごとの報告 - ${reportData.name}`;
-      } else if (geminiStatus === CONFIG.STATUS_STRINGS.BAD) {
+      if (geminiStatus === CONFIG.STATUS_STRINGS.BAD) {
         subject = `【要確認】日報で「悪い」評価 - ${reportData.name}`;
       }
 
@@ -443,12 +466,6 @@ function assessAndNotify(reportData, managerName, managerRoomId) {
       }
     }
   }
-  
-  try {
-    logReportToSheet(reportData, geminiStatus, geminiReason, managerName);
-  } catch (e) {
-    Logger.log('スプレッドシートへの日報ログ記録に失敗しました: ' + e.message);
-  }
 }
 
 /**
@@ -458,24 +475,56 @@ function assessAndNotify(reportData, managerName, managerRoomId) {
  * @param {string} reason AIによる評価理由
  * @param {string} managerName マネージャー名
  */
-function logReportToSheet(reportData, status, reason, managerName) {
-  const logSheetName = CONFIG.DAILY_REPORT_LOG_SHEET_NAME;
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(logSheetName);
-  if (!sheet) {
-    throw new Error(`シート「${logSheetName}」が見つかりません。`);
+function logReportToSheet(reportData, status, reason, managerName, employeeRoomId) {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+
+  // A. メインの「日報ログ」シートへの書き込み
+  const mainLogSheet = spreadsheet.getSheetByName(CONFIG.DAILY_REPORT_LOG_SHEET_NAME);
+  if (!mainLogSheet) {
+    throw new Error(`シート「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」が見つかりません。`);
   }
-  sheet.appendRow([
-    new Date(),           // タイムスタンプ
-    reportData.name,      // 氏名
-    managerName || CONFIG.DEFAULT_VALUES.NOT_APPLICABLE, // マネージャー名
-    reportData.date,      // 日報日付
+  mainLogSheet.appendRow([
+    new Date(),
+    reportData.name,
+    managerName || CONFIG.DEFAULT_VALUES.NOT_APPLICABLE,
+    reportData.date,
     reportData.workContent,
     reportData.mood,
     reportData.problems,
     status,
     reason
   ]);
-  Logger.log(`日報データを「${logSheetName}」シートに記録しました。`);
+  Logger.log(`日報データを「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」シートに記録しました。`);
+
+  // B. メンバーごとの「個別日報ログ」シートへの書き込み
+  const memberSheetName = `${reportData.name}_${employeeRoomId}`;
+  let memberSheet = spreadsheet.getSheetByName(memberSheetName);
+
+  if (!memberSheet) {
+    const sheetIndex = spreadsheet.getSheets().length;
+    memberSheet = spreadsheet.insertSheet(memberSheetName, sheetIndex);
+    memberSheet.appendRow(CONFIG.MEMBER_DAILY_REPORT_LOG_HEADERS);
+
+    // 列幅とヘッダー色の設定
+    CONFIG.DAILY_REPORT_LOG_COLUMN_WIDTHS.forEach(col => {
+      if (col.index <= CONFIG.MEMBER_DAILY_REPORT_LOG_HEADERS.length) {
+        memberSheet.setColumnWidth(col.index, col.width);
+      }
+    });
+    memberSheet.getRange(1, 1, 1, CONFIG.MEMBER_DAILY_REPORT_LOG_HEADERS.length).setBackground(CONFIG.DAILY_REPORT_LOG_HEADER_BG_COLOR);
+    memberSheet.setFrozenRows(1); // 1行目を固定
+  }
+
+  memberSheet.appendRow([
+    new Date(),
+    reportData.name,
+    managerName || CONFIG.DEFAULT_VALUES.NOT_APPLICABLE,
+    reportData.date,
+    reportData.workContent,
+    reportData.mood,
+    reportData.problems
+  ]);
+  Logger.log(`日報データを「${memberSheetName}」シートに記録しました。`);
 }
 
 /**
@@ -625,298 +674,6 @@ function callGeminiApi(prompt) {
   }
 }
 
-// --- 1on1ヒアリング項目生成機能 ---
-
-/**
- * 指定された社員の過去の日報データを取得し、要約する。
- * @param {string} employeeName 対象社員名
- * @returns {string} 要約された日報ログのテキスト
- */
-function getDailyReportDataForEmployee(employeeName) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DAILY_REPORT_LOG_SHEET_NAME);
-  if (!sheet) {
-    Logger.log(`シート「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」が見つかりません。`);
-    return '日報ログが見つかりませんでした。';
-  }
-
-  const values = sheet.getDataRange().getValues();
-  if (values.length <= 1) {
-    return '過去の日報ログはありません。';
-  }
-  Logger.log(`「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」シートから全 ${values.length - 1} 件のデータを読み込みました。`);
-
-  const header = values[0];
-  const dataRows = values.slice(1);
-
-  const headerMap = header.reduce((acc, col, index) => ({ ...acc, [col]: index }), {});
-
-  const nameCol = headerMap['氏名'];
-  const dateCol = headerMap['日報日付'];
-  const moodCol = headerMap['今日の気分'];
-  const problemsCol = headerMap['困っていること'];
-  const workContentCol = headerMap['今日の業務内容'];
-  const aiStatusCol = headerMap['AI評価状態'];
-  const aiReasonCol = headerMap['AI評価理由'];
-
-  if (nameCol === undefined || dateCol === undefined || moodCol === undefined || problemsCol === undefined || workContentCol === undefined || aiStatusCol === undefined || aiReasonCol === undefined) {
-    Logger.log('日報ログシートのヘッダーが不正です。');
-    return '日報ログシートのヘッダーが不正なため、データを読み込めませんでした。';
-  }
-
-  const targetDate = new Date();
-  targetDate.setDate(targetDate.getDate() - CONFIG.DAILY_REPORT_LOG_FETCH_DAYS_FOR_1ON1);
-
-  const employeeReports = dataRows.filter(row => {
-    const reportName = row[nameCol] ? row[nameCol].toString().trim() : '';
-    const reportDate = row[dateCol] ? new Date(row[dateCol]) : null;
-    return reportName.toLowerCase() === employeeName.toLowerCase() && reportDate && reportDate >= targetDate;
-  });
-  
-  Logger.log(`${employeeName}さんの日報を ${employeeReports.length} 件抽出しました。`);
-
-  if (employeeReports.length === 0) {
-    return `過去${CONFIG.DAILY_REPORT_LOG_FETCH_DAYS_FOR_1ON1}日間の日報ログはありません。`;
-  }
-
-  // --- 日報ログの集約・要約 (ハイブリッド形式) ---
-  const moodCounts = CONFIG.MOOD_OPTIONS.reduce((acc, mood) => ({ ...acc, [mood]: 0 }), {});
-  const problemKeywords = CONFIG.PROBLEM_KEYWORDS.reduce((acc, keyword) => ({ ...acc, [keyword]: 0 }), {});
-  const positiveKeywords = new Set();
-  const representativeReports = [];
-  const processedMonths = new Set();
-
-  // AI評価が「危険」「少し悪い」の日報を優先的に収集
-  const negativeReports = employeeReports.filter(report => {
-    const aiStatus = report[aiStatusCol] ? report[aiStatusCol].toString().trim() : '';
-    return aiStatus === CONFIG.STATUS_STRINGS.DANGER || aiStatus === CONFIG.STATUS_STRINGS.WARNING;
-  });
-
-  // その他の日報から、月ごとにランダムに選択
-  const otherReports = employeeReports.filter(report => {
-    const aiStatus = report[aiStatusCol] ? report[aiStatusCol].toString().trim() : '';
-    return aiStatus !== CONFIG.STATUS_STRINGS.DANGER && aiStatus !== CONFIG.STATUS_STRINGS.WARNING;
-  });
-
-  // 代表的な日報の抜粋を収集 (最大件数はCONFIGで設定)
-  const reportsToSample = [...negativeReports];
-  
-  if (reportsToSample.length < CONFIG.REPRESENTATIVE_REPORTS_COUNT) {
-    const shuffledOtherReports = otherReports.sort(() => 0.5 - Math.random());
-    for (const report of shuffledOtherReports) {
-      const reportDate = new Date(report[dateCol]);
-      const monthKey = `${reportDate.getFullYear()}-${reportDate.getMonth()}`;
-      
-      if (!processedMonths.has(monthKey) && reportsToSample.length < CONFIG.REPRESENTATIVE_REPORTS_COUNT) {
-        reportsToSample.push(report);
-        processedMonths.add(monthKey);
-      }
-      if (reportsToSample.length >= CONFIG.REPRESENTATIVE_REPORTS_COUNT) break;
-    }
-  }
-
-  reportsToSample.slice(0, CONFIG.REPRESENTATIVE_REPORTS_COUNT).forEach(report => {
-    const reportDate = report[dateCol] ? new Date(report[dateCol]).toLocaleDateString('ja-JP') : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE;
-    const mood = report[moodCol] ? report[moodCol].toString().trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE;
-    const problems = report[problemsCol] ? truncateText(report[problemsCol].toString().trim(), CONFIG.TRUNCATE_TEXT_MAX_LENGTH_EXCERPT) : CONFIG.DEFAULT_VALUES.NO_PROBLEM;
-    const aiStatus = report[aiStatusCol] ? report[aiStatusCol].toString().trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE;
-    representativeReports.push(`日付: ${reportDate}, 気分: ${mood}, 困り事: ${problems}, AI評価: ${aiStatus}`);
-  });
-
-  employeeReports.forEach(report => {
-    const mood = report[moodCol] ? report[moodCol].toString().trim() : '';
-    if (moodCounts.hasOwnProperty(mood)) {
-      moodCounts[mood]++;
-    }
-
-    const problems = report[problemsCol] ? report[problemsCol].toString().trim() : '';
-    for (const keyword in problemKeywords) {
-      if (problems.includes(keyword)) {
-        problemKeywords[keyword]++;
-      }
-    }
-
-    const workContent = report[workContentCol] ? report[workContentCol].toString().trim() : '';
-    if (mood === '良い' || mood === '非常に良い') {
-      if (workContent.includes(CONFIG.POSITIVE_KEYWORDS.RELEASE)) positiveKeywords.add('新規機能リリース');
-      if (CONFIG.POSITIVE_KEYWORDS.CUSTOMER_APPRECIATION_KEYWORDS.some(kw => workContent.includes(kw))) positiveKeywords.add('顧客高評価');
-      if (workContent.includes(CONFIG.POSITIVE_KEYWORDS.IMPROVEMENT)) positiveKeywords.add('業務改善');
-      if (workContent.includes(CONFIG.POSITIVE_KEYWORDS.ACHIEVEMENT)) positiveKeywords.add('目標達成');
-    }
-  });
-
-  let quantitativeSummary = '気分推移: ';
-  quantitativeSummary += Object.entries(moodCounts)
-    .filter(([, count]) => count > 0)
-    .map(([mood, count]) => `${mood}(${count}回)`) 
-    .join(', ');
-
-  const frequentProblemsList = Object.entries(problemKeywords)
-    .filter(([, count]) => count > 0)
-    .sort((a, b) => b[1] - a[1])
-    .map(([keyword, count]) => `${keyword}(${count}回)`) 
-    .join(', ');
-  if (frequentProblemsList) {
-    quantitativeSummary += `\n繰り返し課題: ${frequentProblemsList}`;
-  }
-
-  const positiveAspectsList = Array.from(positiveKeywords).join(', ');
-  if (positiveAspectsList) {
-    quantitativeSummary += `\nポジティブ事項: ${positiveAspectsList}`;
-  }
-
-  let excerptsSummary = '';
-  if (representativeReports.length > 0) {
-    excerptsSummary = `\n\n代表的な日報の抜粋 (最大${CONFIG.REPRESENTATIVE_REPORTS_COUNT}件):\n` + representativeReports.map(r => `- ${r}`).join('\n');
-  }
-
-  const finalSummary = `過去${CONFIG.DAILY_REPORT_LOG_FETCH_DAYS_FOR_1ON1}日間の日報サマリー (${employeeReports.length}件のデータ):\n${quantitativeSummary}${excerptsSummary}`;
-
-  Logger.log(`${employeeName}さんの日報ログ要約が完了しました。`);
-  return finalSummary;
-}
-
-/**
- * Googleドライブから指定された社員の自己評価シートを読み込み、データを抽出する。
- * @param {string} employeeName 対象社員名
- * @param {string} folderId 自己評価シートが保存されているGoogleドライブのフォルダID
- * @param {string} sheetName 自己評価シート内の読み込むシート名
- * @returns {Object|null} 抽出された自己評価データ、またはnull
- */
-function getSelfEvaluationDataForEmployee(employeeName, folderId, sheetName) {
-  try {
-    const folder = DriveApp.getFolderById(folderId);
-    const files = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
-    let selfEvalFile = null;
-
-    const normalizedEmployeeName = employeeName.trim().toLowerCase();
-
-    while (files.hasNext()) {
-      const file = files.next();
-      if (file.getName().toLowerCase().includes(normalizedEmployeeName) && file.getName().includes(CONFIG.SELF_EVAL_FILENAME_KEYWORD)) {
-        selfEvalFile = file;
-        break;
-      }
-    }
-
-    if (!selfEvalFile) {
-      Logger.log(`自己評価シートが見つかりませんでした: ${employeeName}さんの「${CONFIG.SELF_EVAL_FILENAME_KEYWORD}」を含むGoogleスプレッドシートファイルがフォルダID ${folderId} 内に見つかりません。`);
-      return null;
-    }
-
-    const spreadsheet = SpreadsheetApp.openById(selfEvalFile.getId());
-    const sheet = spreadsheet.getSheetByName(sheetName);
-    if (!sheet) {
-      Logger.log(`エラー: スプレッドシートID「${selfEvalFile.getId()}」内にシート「${sheetName}」が見つかりません。`);
-      return null;
-    }
-
-    const values = sheet.getDataRange().getValues();
-    if (values.length < 2) {
-      Logger.log(`シート「${sheetName}」にデータがありません。`);
-      return null;
-    }
-    Logger.log(`自己評価シート「${sheet.getParent().getName()}」の「${sheetName}」から ${values.length - 1} 件のデータを読み込みました。`);
-
-    const header = values[0];
-    const dataRows = values.slice(1);
-
-    const headerMap = {};
-    header.forEach((col, index) => {
-      if (typeof col === 'string') {
-        headerMap[col.trim()] = index;
-      }
-    });
-
-    const extractedData = {
-      employeeName: '',
-      evaluationPeriod: '',
-      questions: [],
-      '来季目標': '',
-      '目標達成のためにサポートしてほしい事': '',
-      'サポート方針': '',
-      '目標グレード': ''
-    };
-
-    const employeeNameHeaderIndex = headerMap[CONFIG.SELF_EVALUATION_DEFAULT_NAME_HEADER];
-    if (employeeNameHeaderIndex === undefined) {
-      Logger.log(`エラー: 自己評価シートに「${CONFIG.SELF_EVALUATION_DEFAULT_NAME_HEADER}」列が見つかりません。`);
-      return null;
-    }
-
-    const employeeRow = dataRows.find(row => {
-      const employeeNameInSheet = row[employeeNameHeaderIndex];
-      return employeeNameInSheet && employeeNameInSheet.toString().trim().toLowerCase() === normalizedEmployeeName;
-    });
-
-    if (!employeeRow) {
-      Logger.log(`シート「${sheetName}」に社員「${employeeName}」のデータが見つかりませんでした。`);
-      return null;
-    }
-    Logger.log(`社員「${employeeName}」さんのデータを1件見つけました。`);
-
-    extractedData.employeeName = employeeRow[employeeNameHeaderIndex] ? employeeRow[employeeNameHeaderIndex].toString().trim() : CONFIG.DEFAULT_VALUES.NOT_APPLICABLE;
-
-    const evaluationPeriodIndex = headerMap[CONFIG.SELF_EVAL_PERIOD_HEADER];
-    if (evaluationPeriodIndex !== undefined) {
-      extractedData.evaluationPeriod = employeeRow[evaluationPeriodIndex] ? employeeRow[evaluationPeriodIndex].toString().trim() : '';
-    }
-
-    CONFIG.SELF_EVAL_SINGLE_ITEM_HEADERS.forEach(itemHeader => {
-      const colIndex = headerMap[itemHeader];
-      if (colIndex !== undefined) {
-        const value = employeeRow[colIndex];
-        extractedData[itemHeader] = value ? value.toString().trim() : '';
-      } else {
-        extractedData[itemHeader] = '';
-      }
-    });
-
-    const questionNames = new Set();
-
-    header.forEach(h => {
-      if (typeof h === 'string') {
-        for (const suffix of CONFIG.SELF_EVAL_QUESTION_SUFFIXES) {
-          if (h.endsWith(suffix)) {
-            questionNames.add(h.replace(suffix, '').trim());
-            break;
-          }
-        }
-      }
-    });
-
-    questionNames.forEach(qName => {
-      const questionData = {
-        questionName: qName,
-        questionContent: '',
-        selfComment: '',
-        managerComment: '',
-        selfEvaluation: '',
-        managerEvaluation: ''
-      };
-
-      CONFIG.SELF_EVAL_QUESTION_SUFFIXES.forEach(suffix => {
-        const fullHeader = `${qName}${suffix}`;
-        const colIndex = headerMap[fullHeader];
-        if (colIndex !== undefined) {
-          const value = employeeRow[colIndex];
-          if (suffix === '_設問内容') questionData.questionContent = value ? value.toString().trim() : '';
-          if (suffix === '_本人コメント') questionData.selfComment = value ? value.toString().trim() : '';
-          if (suffix === '_マネージャコメント') questionData.managerComment = value ? value.toString().trim() : '';
-          if (suffix === '_自己評価') questionData.selfEvaluation = value ? value.toString().trim() : '';
-          if (suffix === '_マネージャ評価') questionData.managerEvaluation = value ? value.toString().trim() : '';
-        }
-      });
-      extractedData.questions.push(questionData);
-    });
-
-    Logger.log(`自己評価シート「${selfEvalFile.getName()}」からデータを抽出しました。`);
-    return extractedData;
-
-  } catch (e) {
-    Logger.log(`自己評価シートの読み込みまたは解析中にエラーが発生しました: ${e.message}`);
-    return null;
-  }
-}
 
 /**
  * テキストを指定した最大長に短縮し、中央を省略する。
@@ -932,139 +689,6 @@ function truncateText(text, maxLength = CONFIG.TRUNCATE_TEXT_MAX_LENGTH) {
   return text.substring(0, half) + ' ... ' + text.substring(text.length - half);
 }
 
-/**
- * 1on1ヒアリング項目を生成する。
- */
-function generate1on1Topics() {
-  const ui = SpreadsheetApp.getUi();
-  const properties = PropertiesService.getScriptProperties();
-  const targetEmployeeName = properties.getProperty(CONFIG.TARGET_EMPLOYEE_NAME_FOR_1ON1_KEY);
-  const selfEvaluationFolderId = properties.getProperty(CONFIG.SELF_EVALUATION_FOLDER_ID_KEY);
-  const selfEvaluationInputSheetName = properties.getProperty(CONFIG.SELF_EVALUATION_INPUT_SHEET_NAME_KEY);
-
-  if (!targetEmployeeName) {
-    const errorMessage = `スクリプトプロパティ「${CONFIG.TARGET_EMPLOYEE_NAME_FOR_1ON1_KEY}」が設定されていません。処理をスキップします。`;
-    Logger.log(errorMessage);
-    ui.alert('設定エラー', errorMessage + '「プロジェクトの設定」 > 「スクリプトプロパティ」を確認してください。', ui.ButtonSet.OK);
-    return;
-  }
-
-  if (!selfEvaluationFolderId) {
-    const errorMessage = `スクリプトプロパティ「${CONFIG.SELF_EVALUATION_FOLDER_ID_KEY}」が設定されていません。処理をスキップします。自己評価シートの読み込みにはこの設定が必要です。`;
-    Logger.log(errorMessage);
-    ui.alert('設定エラー', errorMessage + '「プロジェクトの設定」 > 「スクリプトプロパティ」を確認してください。', ui.ButtonSet.OK);
-    return;
-  }
-
-  if (!selfEvaluationInputSheetName) {
-    const errorMessage = `スクリプトプロパティ「${CONFIG.SELF_EVALUATION_INPUT_SHEET_NAME_KEY}」が設定されていません。処理をスキップします。自己評価シートの読み込みにはこの設定が必要です。`;
-    Logger.log(errorMessage);
-    ui.alert('設定エラー', errorMessage + '「プロジェクトの設定」 > 「スクリプトプロパティ」を確認してください。', ui.ButtonSet.OK);
-    return;
-  }
-
-  const employeeList = getChatworkTargetRoomIds();
-  const targetEmployee = employeeList.find(emp => emp.employeeName === targetEmployeeName);
-
-  if (!targetEmployee) {
-      const errorMessage = `「${CONFIG.CHATWORK_SETTINGS_SHEET_NAME}」シートに「${targetEmployeeName}」さんが見つかりません。`;
-      Logger.log(errorMessage);
-      ui.alert('設定エラー', errorMessage, ui.ButtonSet.OK);
-      return;
-  }
-  
-  const { managerRoomId } = targetEmployee;
-
-  if (!managerRoomId) {
-      Logger.log(`マネージャーのChatworkルームIDが設定されていません（${targetEmployeeName}さん）。`);
-      ui.alert('エラー', 'マネージャーのルームIDが設定されていません。', ui.ButtonSet.OK);
-      return;
-  }
-
-  Logger.log(`TARGET_EMPLOYEE_NAME_FOR_1ON1で指定された${targetEmployeeName}さんの1on1ヒアリング項目生成を開始します。`);
-
-  // 日報ログの要約を取得
-  const dailyReportSummary = getDailyReportDataForEmployee(targetEmployeeName);
-
-  // 自己評価シートのデータを取得
-  const selfEvalData = getSelfEvaluationDataForEmployee(targetEmployeeName, selfEvaluationFolderId, selfEvaluationInputSheetName);
-
-  if (!selfEvalData || Object.keys(selfEvalData).length === 0) {
-    const infoMessage = `「${targetEmployeeName}」さんの自己評価シートから有効なデータが抽出できませんでした。シート名「${selfEvaluationInputSheetName}」またはシートのフォーマットを確認してください。`;
-    Logger.log(infoMessage);
-    ui.alert('情報', infoMessage, ui.ButtonSet.OK);
-    return;
-  }
-
-  // Geminiプロンプトの構築
-  let promptSelfEvalData = '';
-
-  if (selfEvalData.evaluationPeriod) {
-    promptSelfEvalData += `評価期間: ${selfEvalData.evaluationPeriod}\n`;
-  }
-
-  selfEvalData.questions.forEach((q, index) => {
-    promptSelfEvalData += `${index + 1}. ${q.questionContent}`;
-    if (q.selfComment) promptSelfEvalData += ` (本人コメント): ${q.selfComment}`;
-    if (q.selfEvaluation) promptSelfEvalData += ` / 自己評価: ${q.selfEvaluation}`;
-    promptSelfEvalData += `\n`;
-  });
-
-  if (selfEvalData['来季目標']) promptSelfEvalData += `来季目標: ${selfEvalData['来季目標']}\n`;
-  if (selfEvalData['目標達成のためにサポートしてほしい事']) promptSelfEvalData += `目標達成のためにサポートしてほしい事: ${selfEvalData['目標達成のためにサポートしてほしい事']}\n`;
-  if (selfEvalData['サポート方針']) promptSelfEvalData += `サポート方針: ${selfEvalData['サポート方針']}\n`;
-  if (selfEvalData['目標グレード']) promptSelfEvalData += `目標グレード: ${selfEvalData['目標グレード']}\n`;
-
-  const geminiPrompt = CONFIG.ONE_ON_ONE_PROMPT_TEMPLATE
-    .replace(/{anonymousName}/g, targetEmployeeName)
-    .replace('{dailyReportSummary}', dailyReportSummary)
-    .replace('{promptSelfEvalData}', promptSelfEvalData);
-
-  try {
-    const geminiResponse = callGeminiApi(geminiPrompt);
-    const hearingTopicsRaw = geminiResponse.candidates[0].content.parts[0].text;
-    Logger.log('--- Geminiからの生応答 ---\n' + hearingTopicsRaw);
-
-    // --- Chatwork通知メッセージの整形ロジック（修正版） ---
-    let formattedTopics = '';
-    const topics = hearingTopicsRaw.split(/\n\s*\n/); // 質問・根拠のペアで分割
-
-    let questionCount = 0;
-    topics.forEach(topic => {
-      const questionMatch = topic.match(/\*\d+\.\s*([\s\S]*?)(?=\n\*具体的な質問と根拠\*)/);
-      const rationaleMatch = topic.match(/\*具体的な質問と根拠\*([\s\S]*)/);
-
-      if (questionMatch && questionMatch[1] && rationaleMatch && rationaleMatch[1]) {
-        questionCount++;
-        const question = questionMatch[1].replace(/\*/g, '').trim();
-        const rationale = rationaleMatch[1].replace(/\*/g, '').trim();
-
-        formattedTopics += `${questionCount}. ${question}\n`;
-        formattedTopics += `   根拠: ${rationale}\n\n`;
-      }
-    });
-
-    if (questionCount === 0) {
-      Logger.log('Gemini応答の解析に失敗しました。正規表現が期待通りにマッチしませんでした。フォールバックとして生テキストを送信します。');
-      formattedTopics = hearingTopicsRaw.replace(/\*/g, ''); // Markdown記号を除去
-    }
-    // --- 整形ロジックここまで ---
-
-    const subject = CONFIG.ONE_ON_ONE_SUBJECT_TEMPLATE.replace('{employeeName}', targetEmployeeName);
-    const body = CONFIG.ONE_ON_ONE_BODY_TEMPLATE
-      .replace('{subject}', subject)
-      .replace('{formattedTopics}', formattedTopics.trim());
-
-    sendChatworkNotification(managerRoomId, body);
-    Logger.log(`${targetEmployeeName}さんの1on1ヒアリング項目をChatworkに通知しました。`);
-    ui.alert('完了', `${targetEmployeeName}さんの1on1ヒアリング項目生成と通知が完了しました。`, ui.ButtonSet.OK);
-  } catch (error) {
-    const errorMessage = `1on1ヒアリング項目生成中にエラーが発生しました: ${error.message}`;
-    Logger.log(errorMessage);
-    ui.alert('エラー', errorMessage, ui.ButtonSet.OK);
-  }
-}
-
 // --- 週次レポート生成機能 ---
 
 /**
@@ -1077,9 +701,9 @@ function generateWeeklyReports() {
 
   try {
     const employeeList = getChatworkTargetRoomIds();
-    const managersToProcess = {}; // Key: managerRoomId, Value: { managerName, managerRoomId, weeklyReportMode, groupName, employees: [] }
+    const managersToProcess = {}; // Key: `${managerRoomId}_${groupName}`, Value: { managerName, managerRoomId, weeklyReportMode, groupName, employees: [] }
 
-    // マネージャーごとに社員をグループ化
+    // マネージャーとグループごとに社員をグループ化
     employeeList.forEach(employee => {
       const { employeeName, employeeRoomId, managerName, managerRoomId, weeklyReportMode, group, role } = employee;
 
@@ -1088,8 +712,9 @@ function generateWeeklyReports() {
         return;
       }
 
-      if (!managersToProcess[managerRoomId]) {
-        managersToProcess[managerRoomId] = {
+      const managerGroupKey = `${managerRoomId}_${group}`;
+      if (!managersToProcess[managerGroupKey]) {
+        managersToProcess[managerGroupKey] = {
           name: managerName,
           roomId: managerRoomId,
           weeklyReportMode: weeklyReportMode,
@@ -1097,12 +722,12 @@ function generateWeeklyReports() {
           employees: []
         };
       }
-      managersToProcess[managerRoomId].employees.push({ employeeName, employeeRoomId, role });
+      managersToProcess[managerGroupKey].employees.push({ employeeName, employeeRoomId, role });
     });
 
     // 各マネージャー/グループに対してレポートを生成
-    for (const managerRoomId in managersToProcess) {
-      const managerData = managersToProcess[managerRoomId];
+    for (const managerGroupKey in managersToProcess) {
+      const managerData = managersToProcess[managerGroupKey];
       const today = new Date();
       const subjectDate = `${today.getFullYear()}/${today.getMonth() + 1}/${today.getDate()}`;
 
@@ -1113,7 +738,7 @@ function generateWeeklyReports() {
 
         managerData.employees.forEach(employee => {
           if (employee.role === CONFIG.CHATWORK_ROLE_EMPLOYEE) {
-            const rawReports = getWeeklyRawReports(employee.employeeName);
+            const rawReports = getWeeklyRawReports(employee.employeeName, employee.employeeRoomId);
             if (rawReports.length > 0) {
               try {
                 const { reportText, subject } = generateIndividualReportWithGemini(rawReports, employee.employeeName);
@@ -1187,7 +812,7 @@ function generateWeeklyReports() {
  * @param {string} employeeName 対象社員名
  * @returns {Array<Object>} 過去1週間分の日報データ（オブジェクトの配列）
  */
-function getWeeklyRawReports(employeeName) {
+function getWeeklyRawReports(employeeName, employeeRoomId) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DAILY_REPORT_LOG_SHEET_NAME);
   if (!sheet) {
     Logger.log(`シート「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」が見つかりません。`);
@@ -1240,7 +865,7 @@ function getWeeklyRawReports(employeeName) {
  * @param {Array<string>} employeeNames 対象社員名の配列
  * @returns {Object|null} 集計データ
  */
-function getWeeklyTeamReportSummaryForGroup(employeeNames) {
+function getWeeklyTeamReportSummaryForGroup(employees) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DAILY_REPORT_LOG_SHEET_NAME);
   if (!sheet) {
     Logger.log(`シート「${CONFIG.DAILY_REPORT_LOG_SHEET_NAME}」が見つかりません。`);
@@ -1271,6 +896,7 @@ function getWeeklyTeamReportSummaryForGroup(employeeNames) {
   const oneWeekAgo = new Date();
   oneWeekAgo.setDate(oneWeekAgo.getDate() - CONFIG.WEEKLY_REPORT_FETCH_DAYS);
 
+  const employeeNames = employees;
   const weeklyReports = dataRows.filter(row => {
     const reportName = row[nameCol] ? row[nameCol].toString().trim() : '';
     const reportDate = row[dateCol] ? new Date(row[dateCol]) : null;

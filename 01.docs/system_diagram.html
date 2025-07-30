@@ -281,53 +281,8 @@
             </div>
         </div>
 
-        <h2>2. 1on1ヒアリング項目生成（手動実行）</h2>
-        <div class="flowchart">
-            <div class="flow-step">
-                <div class="node actor">マネージャー (Manager)</div>
-                <div class="description">(スプレッドシートのメニュー操作)</div>
-            </div>
-            <div class="flow-connector"></div>
-
-            <div class="flow-step">
-                <div class="node">Google Apps Script</div>
-                <div class="description">(A) generate1on1Topics 実行</div>
-                <div class="details">
-                    <div class="sub-step">
-                        <div class="node data-store">(B) 日報ログを取得 (Spreadsheet)</div>
-                    </div>
-                    <div class="sub-step">
-                        <div class="node data-store">(C) 自己評価シートを取得 (Google Drive)</div>
-                    </div>
-                    <div class="sub-step">
-                        <div class="node process">(D) 日報と自己評価を要約</div>
-                    </div>
-                </div>
-            </div>
-            <div class="flow-connector"></div>
-
-            <div class="flow-step">
-                <div class="node api-call">Gemini API</div>
-                <div class="description">(E) 要約を基にヒアリング項目生成</div>
-            </div>
-            <div class="flow-connector"></div>
-
-            <div class="flow-step">
-                <div class="node">Google Apps Script</div>
-                <div class="description">(F) 生成された項目</div>
-                <div class="details">
-                    <div class="sub-step">
-                        <div class="node api-call">(G) 項目を整形して通知 (Chatwork API)</div>
-                    </div>
-                </div>
-            </div>
-            <div class="flow-connector"></div>
-
-            <div class="flow-step">
-                <div class="node actor">マネージャー (Manager)</div>
-            </div>
-        </div>
-        <h2>3. 週次レポート生成（週次自動実行）</h2>
+        
+        <h2>2. 週次レポート生成（週次自動実行）</h2>
         <div class="flowchart">
             <div class="flow-step">
                 <div class="node">時間トリガー (毎週月曜 10:00 AM)</div>
@@ -351,57 +306,36 @@
             </div>
             <div class="flow-connector"></div>
 
-            <div class="flow-branching">
-                <div class="branch-path">
-                    <div class="branch-label">(E) weeklyReportMode === 'individual'</div>
-                    <div class="flow-connector"></div>
-                    <div class="flow-step">
-                        <div class="node">Google Apps Script</div>
-                        <div class="details">
-                            <div class="sub-step">
-                                <div class="node api-call">(G) 各メンバーのレポートを集約し、整形して通知 (Chatwork API)</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flow-connector"></div>
-                    <div class="flow-step">
-                        <div class="node actor">マネージャー (Manager)</div>
+            <div class="flow-step">
+                <div class="node">Google Apps Script</div>
+                <div class="details">
+                    <div class="sub-step">
+                        <div class="node process">(E) 過去1週間分の日報データを取得・集計</div>
+                        <div class="description">（レポートモードに応じて個人・チーム単位で処理）</div>
                     </div>
                 </div>
-                <div class="branch-path">
-                    <div class="branch-label">(F) weeklyReportMode === 'team'</div>
-                    <div class="flow-connector"></div>
-                    <div class="flow-step">
-                        <div class="node">Google Apps Script</div>
-                        <div class="details">
-                            <div class="sub-step">
-                                <div class="node process">(H) 過去1週間分の日報を集計</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flow-connector"></div>
-                    <div class="flow-step">
-                        <div class="node api-call">Gemini API</div>
-                        <div class="description">(I) チームコンディションサマリー生成</div>
-                    </div>
-                    <div class="flow-connector"></div>
-                    <div class="flow-step">
-                        <div class="node api-call">(J) 生成されたサマリー</div>
-                    </div>
-                    <div class="flow-connector"></div>
-                    <div class="flow-step">
-                        <div class="node">Google Apps Script</div>
-                        <div class="details">
-                            <div class="sub-step">
-                                <div class="node api-call">(K) 整形して通知 (Chatwork API)</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flow-connector"></div>
-                    <div class="flow-step">
-                        <div class="node actor">マネージャー (Manager)</div>
+            </div>
+            <div class="flow-connector"></div>
+            <div class="flow-step">
+                <div class="node api-call">Gemini API</div>
+                <div class="description">(F) 週次コンディションサマリーを生成</div>
+            </div>
+            <div class="flow-connector"></div>
+            <div class="flow-step">
+                <div class="node api-call">(G) 生成されたサマリー</div>
+            </div>
+            <div class="flow-connector"></div>
+            <div class="flow-step">
+                <div class="node">Google Apps Script</div>
+                <div class="details">
+                    <div class="sub-step">
+                        <div class="node api-call">(H) 整形してマネージャーに通知 (Chatwork API)</div>
                     </div>
                 </div>
+            </div>
+            <div class="flow-connector"></div>
+            <div class="flow-step">
+                <div class="node actor">マネージャー (Manager)</div>
             </div>
         </div>
     </div>

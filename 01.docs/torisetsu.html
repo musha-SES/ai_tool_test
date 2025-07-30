@@ -17,9 +17,9 @@
 <ul>
 <li><strong>日報の自動収集</strong>: ChatworkのBotが、毎日決まった時刻に各メンバーへ日報提出を促します。</li>
 <li><strong>AIによるコンディション分析</strong>: 提出された日報の内容をGemini APIが分析し、メンバーのコンディションを「良い」「普通」「少し悪い」「悪い」の4段階で評価します。さらに、内容にネガティブな兆候が見られる場合は「危険」と評価することもあります。</li>
-<li><strong>自動アラート通知</strong>: AIの評価が「危険」「少し悪い」「悪い」の場合、または評価が「普通」でも「困っていること」が記載されている場合に、担当マネージャーのChatworkにアラートを送信し、早期対応を促します。</li>
-<li><strong>活動ログの自動蓄積</strong>: 分析したすべての日報データとAIの評価結果は、Googleスプレッドシートに自動で記録・蓄積され、後から分析や振り返りに活用できます。</li>
-<li><strong>1on1面談のトピック自動生成</strong>: 特定メンバーの過去の日報ログ（気分の傾向、頻出する課題キーワード、ポジティブな活動など）と自己評価シートのデータをAIが横断的に分析し、マネージャーが次に話すべき具体的なヒアリング項目を提案します。</li>
+<li><strong>自動アラート通知</strong>: AIの評価が「危険」「少し悪い」「悪い」の場合に、担当マネージャーのChatworkにアラートを送信し、早期対応を促します。</li>
+<li><strong>活動ログの自動蓄積</strong>: 分析したすべての日報データとAIの評価結果は、Googleスプレッドシートに自動で記録・蓄積され、メンバーごとの個別シートにも記録されるため、後から分析や振り返りに活用できます。</li>
+
 </ul>
 
 <h2>2. 導入と初期設定</h2>
@@ -39,7 +39,7 @@
 
 <h3>STEP 3: シートの作成とヘッダー設定</h3>
 
-<p>スプレッドシートに、以下の3つのシートを正確な名前で作成し、各1行目に指定のヘッダーを入力してください。</p>
+<p>スプレッドシートに、以下の3つのシートを正確な名前で作成し、各1行目に指定のヘッダーを入力してください。また、<strong>メンバーごとの日報ログシートは、日報が初めて記録される際に自動で作成されます。</strong></p>
 
 <ol>
 <li><strong><code>Chatwork設定</code>シート</strong>: 誰に日報を依頼し、誰がその報告を受けるかを定義します。
@@ -76,13 +76,17 @@
 <li><strong>エラー詳細</strong>: エラー発生時の詳細情報。</li>
 </ul>
 </li>
-</ol>
+<li><strong><code>メンバー別日報ログ</code>シート</strong>: このシートは、「日報返信の収集・分析」機能が実行されると、メンバーごとに自動で作成されます。<strong>利用者側で事前に作成する必要はありません。</strong>
+<table><thead><tr><th>A列</th><th>B列</th><th>C列</th><th>D列</th><th>E列</th></tr></thead><tbody><tr><td>タイムスタンプ</td><td>日報日付</td><td>今日の業務内容</td><td>今日の気分</td><td>困っていること</td></tr></table>
+</li>
 
 <h3>STEP 4: スクリプトプロパティの設定</h3>
 
 <p>GASエディタの左メニューにある歯車アイコン（<code>プロジェクトの設定</code>）をクリックし、「スクリプト プロパティ」のセクションで <code>＋ スクリプト プロパティを追加</code> をクリックし、以下の情報を追加します。</p>
 
-<table><thead><tr><th>プロパティ名</th><th>値の例</th><th>説明</th></tr></thead><tbody><tr><td><code>CHATWORK_API_KEY</code></td><td><code>a1b2c3d4e5f6...</code></td><td><strong>【必須】</strong> STEP 1で取得したChatwork APIキー。</td></tr><tr><td><code>GEMINI_API_KEY</code></td><td><code>AIzaSy...</code></td><td><strong>【必須】</strong> あなたのGemini APIキー。</td></tr><tr><td><code>TARGET_EMPLOYEE_NAME_FOR_1ON1</code></td><td><code>山田 太郎</code></td><td>(任意) 1on1ヒアリング項目を生成したい社員の氏名。<code>Chatwork設定</code>シートの氏名と完全に一致させてください。</td></tr><tr><td><code>SELF_EVALUATION_FOLDER_ID</code></td><td><code>1a2b3c...</code></td><td>(任意) 1on1機能で利用する自己評価シートが保存されているGoogleドライブのフォルダID。</td></tr><tr><td><code>SELF_EVALUATION_INPUT_SHEET_NAME</code></td><td><code>評価シート</code></td><td>(任意) 自己評価シート（スプレッドシート）内の、データが入力されているシート名。</td></tr><tr><td><code>DAILY_QUESTION_TIME_HOUR</code></td><td><code>9</code></td><td>(任意) 日報質問メッセージを送信する時刻（時、24時間表記）。デフォルトは9時。</td></tr><tr><td><code>DAILY_QUESTION_TIME_MINUTE</code></td><td><code>0</code></td><td>(任意) 日報質問メッセージを送信する時刻（分）。デフォルトは0分。</td></tr><tr><td><code>DAILY_REPLY_COLLECT_TIME_HOUR</code></td><td><code>18</code></td><td>(任意) 日報返信を収集・分析する時刻（時、24時間表記）。デフォルトは18時。</td></tr><tr><td><code>DAILY_REPLY_COLLECT_TIME_MINUTE</code></td><td><code>0</code></td><td>(任意) 日報返信を収集・分析する時刻（分）。デフォルトは0分。</td></tr></tbody></table>
+<table><thead><tr><th>プロパティ名</th><th>値の例</th><th>説明</th></tr></thead><tbody><tr><td><code>CHATWORK_API_KEY</code></td><td><code>a1b2c3d4e5f6...</code></td><td><strong>【必須】</strong> STEP 1で取得したChatwork APIキー。</td></tr><tr><td><code>GEMINI_API_KEY</code></td><td><code>AIzaSy...</code></td><td><strong>【必須】</strong> あなたのGemini APIキー。</td></tr><tr><td><code>CHATWORK_BOT_ACCOUNT_ID</code></td><td><code>123456789</code></td><td><strong>【必須】</strong> BOT自身のChatworkアカウントID。初回実行時に自動取得されますが、手動設定も可能です。</td></tr><tr><td><code>DAILY_QUESTION_TIME_HOUR</code></td><td><code>9</code></td><td>(任意) 日報質問メッセージを送信する時刻（時、24時間表記）。デフォルトは9時。</td></tr><tr><td><code>DAILY_QUESTION_TIME_MINUTE</code></td><td><code>0</code></td><td>(任意) 日報質問メッセージを送信する時刻（分）。デフォルトは0分。</td></tr>
+<tr><td><code>DAILY_REPLY_COLLECT_TIME_HOUR</code></td><td><code>18</code></td><td>(任意) 日報返信を収集・分析する時刻（時、24時間表記）。デフォルトは18時。</td></tr>
+<tr><td><code>DAILY_REPLY_COLLECT_TIME_MINUTE</code></td><td><code>0</code></td><td>(任意) 日報返信を収集・分析する時刻（分）。デフォルトは0分。</td></tr></tbody></table>
 
 <h2>3. ツールの使い方</h2>
 
@@ -109,29 +113,7 @@
 困っていること：特になし
 </code></pre>
 
-<h3>3.3. 1on1ヒアリング項目の生成（マネージャー向け）</h3>
-
-<ol>
-<li><strong>事前準備</strong>:
-<ul>
-<li>スクリプトプロパティ <code>TARGET_EMPLOYEE_NAME_FOR_1ON1</code> に、対象社員の氏名を設定します。</li>
-<li>必要に応じて、<code>SELF_EVALUATION_FOLDER_ID</code> と <code>SELF_EVALUATION_INPUT_SHEET_NAME</code> も設定します。</li>
-<li>対象社員の自己評価シートが、指定したGoogleドライブのフォルダに存在することを確認します。</li>
-</ul>
-</li>
-<li><strong>実行</strong>:
-<ul>
-<li>スプレッドシートのメニュー <code>日報AIツール</code> &gt; <code>1on1ヒアリング項目生成</code> をクリックします。</li>
-</ul>
-</li>
-<li><strong>結果の確認</strong>:
-<ul>
-<li>処理が完了すると、あなたのChatwork（<code>Chatwork設定</code>シートで<code>manager</code>として設定されているユーザー）に、AIが提案したヒアリング項目が通知されます。</li>
-</ul>
-</li>
-</ol>
-
-<h3>3.4. 週次レポートの生成（マネージャー向け）</h3>
+<h3>3.3. 週次レポートの生成（マネージャー向け）</h3>
 
 <p>この機能は、チーム全体の日報ログから過去1週間分のコンディションの傾向を分析し、週次レポートを生成してマネージャーに通知します。レポート形式は<code>Chatwork設定</code>シートの<code>週次レポートモード</code>列で制御できます。</p>
 
@@ -166,17 +148,11 @@
 <li>A3: 「気分」は <code>良い</code> <code>普通</code> <code>少し悪い</code> <code>悪い</code> のいずれかになっていますか？</li>
 </ul>
 </li>
-<li><strong>Q. 「1on1ヒアリング項目生成」でエラーが出ます。</strong>
-<ul>
-<li>A1: スクリプトプロパティの各種キー（対象者名、フォルダIDなど）が正しく設定されているか確認してください。</li>
-<li>A2: <code>日報ログ</code>シートに対象者のデータが十分に存在するか確認してください。</li>
-<li>A3: 指定したフォルダに、対象者の名前を含む自己評価シートが存在するか確認してください。</li>
-</ul>
-</li>
+
 </ul>
 
 <hr>
-<p>最終更新日: 2025/07/23</p>
+<p>最終更新日: 2025/07/29</p>
     </div>
 </body>
 </html>

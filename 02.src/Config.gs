@@ -4,8 +4,12 @@ const CONFIG = {
   DAILY_REPORT_LOG_SHEET_NAME: '日報ログ',
   CHATWORK_SETTINGS_SHEET_NAME: 'Chatwork設定',
 
+  // メンバーごとの日報ログシート
+  
+  MEMBER_DAILY_REPORT_LOG_HEADERS: ['タイムスタンプ', '氏名', 'マネージャー', '日報日付', '今日の業務内容', '今日の気分', '困っていること'],
+
   // 日報・レポート関連
-  DAILY_REPORT_LOG_FETCH_DAYS_FOR_1ON1: 365, // 1on1用日報ログ取得日数
+  
   WEEKLY_REPORT_FETCH_DAYS: 7, // 週次レポート用日報ログ取得日数
   REPRESENTATIVE_REPORTS_COUNT: 5, // getDailyReportDataForEmployee内の代表日報抜粋数
   REPORT_TAG: '#日報',
@@ -57,19 +61,13 @@ const CONFIG = {
   },
 
   // 自己評価関連
-  SELF_EVALUATION_DEFAULT_NAME_HEADER: '氏名',
-  SELF_EVAL_FILENAME_KEYWORD: '自己評価',
-  SELF_EVAL_PERIOD_HEADER: '評価期間',
-  SELF_EVAL_SINGLE_ITEM_HEADERS: ['来季目標', '目標達成のためにサポートしてほしい事', 'サポート方針', '目標グレード'],
-  SELF_EVAL_QUESTION_SUFFIXES: ['_設問内容', '_本人コメント', '_マネージャコメント', '_自己評価', '_マネージャ評価'],
+  
 
   // スクリプトプロパティキー
   CHATWORK_API_KEY: 'CHATWORK_API_KEY',
   GEMINI_API_KEY: 'GEMINI_API_KEY',
   CHATWORK_BOT_ACCOUNT_ID_KEY: 'CHATWORK_BOT_ACCOUNT_ID',
-  TARGET_EMPLOYEE_NAME_FOR_1ON1_KEY: 'TARGET_EMPLOYEE_NAME_FOR_1ON1',
-  SELF_EVALUATION_FOLDER_ID_KEY: 'SELF_EVALUATION_FOLDER_ID',
-  SELF_EVALUATION_INPUT_SHEET_NAME_KEY: 'SELF_EVALUATION_INPUT_SHEET_NAME',
+  
 
   // Gemini API
   GEMINI_MODEL_NAME: 'gemini-2.0-flash',
@@ -96,6 +94,18 @@ const CONFIG = {
     TEAM: 'team' 
   },
 
+  // 日報ログシートのフォーマット
+  DAILY_REPORT_LOG_COLUMN_WIDTHS: [
+    { index: 1, width: 125 }, // A列: タイムスタンプ
+    { index: 2, width: 100 }, // B列: 氏名
+    { index: 3, width: 100 }, // C列: マネージャー
+    { index: 4, width: 100 }, // D列: 日報日付
+    { index: 5, width: 300 }, // E列: 今日の業務内容
+    { index: 6, width: 100 }, // F列: 今日の気分
+    { index: 7, width: 430 }, // G列: 困っていること
+  ],
+  DAILY_REPORT_LOG_HEADER_BG_COLOR: '#A4C2F4', // 明るいコーンフラワー ブルー 3
+
   // --- 正規表現 ---
   CHATWORK_REPLY_REGEX: /\[rp aid=(\d+) to=(\d+)-(\d+)\]/,
   PARSE_REPORT_REGEX: {
@@ -111,11 +121,6 @@ const CONFIG = {
 
   DAILY_REPORT_ALERT_SUBJECT_TEMPLATE: `【注意】日報から社員の調子に懸念 - {employeeName}`,
   DAILY_REPORT_ALERT_BODY_TEMPLATE: `[info][title]{subject}[/title]提出者：{employeeName}\n日付：{date}\nGemini AIによる評価：{geminiStatus}\n理由：{geminiReason}\n[hr]▼ 日報抜粋\n今日の気分：{mood}\n困っていること：{problems}\n[hr]詳細については、スプレッドシートをご確認ください。[/info]`,
-
-  ONE_ON_ONE_PROMPT_TEMPLATE: `以下の{anonymousName}さんの過去1年間の日報サマリーと自己評価シートのデータを総合的に分析し、次回の1on1面談でマネージャーが{anonymousName}さんにヒアリングすべき具体的な質問やテーマを5つ提案してください。質問は部下の心情に寄り添い、具体的な行動を促す形式にしてください。\n\n**過去1年間の日報サマリー：**\n{dailyReportSummary}\n\n**自己評価シートデータ：**\n{promptSelfEvalData}\n\n---\n\n**【重要】回答フォーマットの厳守**\n以下のフォーマットに厳密に従って、5つのヒアリング項目を提案してください。各項目は、質問と根拠を明確に分けて記述してください。\n\n*1. [ここに1つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに1つ目の質問の根拠を記述]\n\n*2. [ここに2つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに2つ目の質問の根拠を記述]\n\n*3. [ここに3つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに3つ目の質問の根拠を記述]\n\n*4. [ここに4つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに4つ目の質問の根拠を記述]\n\n*5. [ここに5つ目の質問内容を記述]\n*具体的な質問と根拠*[ここに5つ目の質問の根拠を記述]`,
-
-  ONE_ON_ONE_SUBJECT_TEMPLATE: `【1on1ヒアリング項目提案】{employeeName}さん向け`,
-  ONE_ON_ONE_BODY_TEMPLATE: `{subject}\n[hr]\n\n▼ 提案されたヒアリング項目\n\n{formattedTopics}\n\n[hr]\nこの提案は、日報ログと自己評価シートの分析に基づいています。詳細なデータはスプレッドシートをご確認ください`,
 
   WEEKLY_REPORT_PROMPT_TEMPLATE: `以下の{subjectName}の過去1週間分のデータから、この{reportType}のコンディションの傾向、主な課題、ポジティブな動きについて分析し、簡潔なサマリーレポートを生成してください。
 マネージャーが週ごとの傾向を**一目で把握できるよう、以下のフォーマットに厳密に従って**記述してください。
